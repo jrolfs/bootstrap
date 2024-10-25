@@ -1,0 +1,55 @@
+{
+  "tasks": {
+    "check": "deno check bootstrap.ts",
+    "lint": "deno lint bootstrap.ts",
+    "fmt": "deno fmt bootstrap.ts"
+  },
+  "fmt": {
+    "useTabs": false,
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "semiColons": true,
+    "singleQuote": false,
+    "proseWrap": "preserve"
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"],
+      "include": [
+        "ban-untagged-todo",
+        "camelcase",
+        "default-param-last",
+        "eqeqeq",
+        "explicit-function-return-type",
+        "explicit-module-boundary-types",
+        "no-const-assign",
+        "no-eval",
+        "no-implicit-declare-namespace-export",
+        "no-non-null-assertion",
+        "no-sparse-arrays",
+        "no-throw-literal",
+        "no-var",
+        "prefer-const",
+        "require-await",
+        "single-var-declarator"
+      ],
+      "exclude": []
+    }
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true
+  }
+}
