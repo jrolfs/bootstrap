@@ -11,7 +11,9 @@ export const shell = async (
   args: string[] = [],
   { error = true }: ShellOptions = {},
 ) => {
-  console.log(`Running: ${command} ${args.join(' ')}`);
+  console.log(
+    `Running: ${command} ${args.map((arg) => arg.split('\n')[0]).join(' ')}`,
+  );
 
   const process = new Deno.Command(command, {
     args,
