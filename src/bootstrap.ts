@@ -20,9 +20,27 @@ const ensureHomebrew = async () => {
   );
 
   const installScript = await response.text();
-  const modifiedScript = installScript.replace(/^#!/, `#!${bashPath.trim()}`);
 
-  await shell(bashPath.trim(), ['-c', modifiedScript]);
+  console.log('Installing Homebrew. This may take a while...');
+  
+  const command = new Deno.Command(bashPath.trim(), {
+    args: ['-c', installScript],
+    env: {
+      ...Deno.env.toObject(),
+      NONINTERACTIVE: '1',
+    },
+    stdin: 'null',
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+
+  const { success } = await command.output();
+
+  if (!success) {
+    throw new Error('Homebrew installation failed');
+  }
+
+  console.log('Homebrew installation complete.');
 };
 
 const setupSSHKey = async () => {

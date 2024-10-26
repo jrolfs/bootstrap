@@ -2,14 +2,14 @@ import { bold, red } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 const decoder = new TextDecoder();
 
-export interface ShellOptions {
+export interface ShellOptions extends Deno.CommandOptions {
   error?: boolean;
 }
 
 export const shell = async (
   command: string,
   args: string[] = [],
-  { error = true }: ShellOptions = {},
+  { error = true, ...options }: ShellOptions = {},
 ) => {
   console.log(
     `Running: ${command} ${args.map((arg) => arg.split('\n')[0]).join(' ')}`,
@@ -19,6 +19,7 @@ export const shell = async (
     args,
     stdout: 'piped',
     stderr: 'piped',
+    ...options
   });
 
   const { success, stdout, stderr } = await process.output();

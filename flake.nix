@@ -14,6 +14,13 @@
         bootstrap = pkgs.writeScriptBin "bootstrap" ''
           #!${pkgs.bash}/bin/bash
           set -e
+
+          # Cache sudo credentials
+          sudo -v
+
+          # Keep sudo credentials fresh
+          (while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null) &
+
           export PATH=${pkgs.lib.makeBinPath [
             pkgs.bash
             pkgs.coreutils
