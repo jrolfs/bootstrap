@@ -333,20 +333,6 @@ const setupHomeshick = async () => {
   ]);
 };
 
-const buildSystem = async () => {
-  const { HOME } = environment();
-  const darwinConfiguration = `${HOME}/.nixpkgs/darwin-configuration.nix`;
-
-  if (!(await pathExists(darwinConfiguration))) {
-    throw new Error(
-      'darwin-configuration.nix not found. Make sure homeshick linked files correctly.',
-    );
-  }
-
-  console.log('Building system configuration...');
-  await shell('darwin-rebuild', ['switch']);
-};
-
 const bootstrap = async () => {
   try {
     environment();
@@ -354,7 +340,6 @@ const bootstrap = async () => {
     await setupSSHKey();
     await ensureHomebrew();
     await setupHomeshick();
-    await buildSystem();
 
     console.log('✨ Bootstrap complete!');
   } catch (error) {

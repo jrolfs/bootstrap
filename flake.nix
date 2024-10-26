@@ -13,18 +13,21 @@
 
         bootstrap = pkgs.writeScriptBin "bootstrap" ''
           #!${pkgs.bash}/bin/bash
+          set -e
           export PATH=${pkgs.lib.makeBinPath [
             pkgs.deno
             pkgs.curl
             pkgs.git
             pkgs.openssh
             pkgs.coreutils
+            pkgs.nix
           ]}
 
           # Change to the directory containing the script and other files
           cd ${./src}
 
-          exec ${pkgs.deno}/bin/deno run \
+          # Run the bootstrap script
+          ${pkgs.deno}/bin/deno run \
             --allow-env \
             --allow-net \
             --allow-read \
@@ -32,6 +35,24 @@
             --allow-sys \
             --allow-write \
             bootstrap.ts
+
+          # Check if nix-darwin is installed
+          if [ ! -f /run/current-system/sw/bin/darwin-rebuild ]; then
+            echo "nix-darwin is not installed. Installing..."
+            ${pkgs.nix}/bin/nix-build https://github.com/LnL7/nix-darwin/archive/master.tar.gz -A installer
+            ./result/bin/darwin-installer
+          else
+            echo "nix-darwin is already installed."
+          fi
+
+          # Rebuild the system using the non-flake configuration
+          if [ -f /run/current-system/sw/bin/darwin-rebuild ]; then
+            echo "Rebuilding the system..."
+            /run/current-system/sw/bin/darwin-rebuild switch
+          else
+            echo "Error: darwin-rebuild not found after installation attempt."
+            exit 1
+          fi
         '';
 
       in
