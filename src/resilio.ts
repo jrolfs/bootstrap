@@ -23,7 +23,6 @@ const waitForResilioSync = async (folderPath: string) => {
 
   console.log(`Waiting for "${folderPath}" to sync...`);
 
-  // Poll the Web GUI API for sync status
   const checkSync = async (): Promise<boolean> => {
     try {
       const response = await fetch('http://localhost:8888/gui/', {

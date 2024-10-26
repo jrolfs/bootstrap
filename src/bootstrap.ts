@@ -11,10 +11,18 @@ const ensureHomebrew = async () => {
   }
 
   console.log('Installing Homebrew...');
-  await shell('bash', [
-    '-c',
-    '$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)',
-  ]);
+
+  const { stdout: bashPath } = await shell('which', ['bash']);
+  if (!bashPath) throw new Error('Could not find bash executable');
+
+  const response = await fetch(
+    'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh',
+  );
+
+  const installScript = await response.text();
+  const modifiedScript = installScript.replace(/^#!/, `#!${bashPath.trim()}`);
+
+  await shell(bashPath.trim(), ['-c', modifiedScript]);
 };
 
 const setupSSHKey = async () => {
@@ -60,7 +68,7 @@ const setupHomeshick = async () => {
 
   await Promise.all(
     configuration.github.repositories.map(
-      async repository => {
+      async (repository) => {
         const repositoryPath = `${HOME}/.homesick/repos/${repository.name}`;
 
         if (await pathExists(repositoryPath)) {

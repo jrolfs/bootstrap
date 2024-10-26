@@ -22,6 +22,7 @@
             pkgs.git
             pkgs.nix
             pkgs.openssh
+            pkgs.which
           ]}
 
           # Change to the directory containing the script and other files
