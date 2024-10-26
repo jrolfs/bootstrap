@@ -19,6 +19,7 @@
             pkgs.git
             pkgs.openssh
             pkgs.coreutils
+            "/bin"
           ]}
 
           exec ${pkgs.deno}/bin/deno run \
