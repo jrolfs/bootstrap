@@ -11,7 +11,7 @@ const ensureHomebrew = async () => {
   }
 
   console.log('Installing Homebrew...');
-  await shell('/bin/bash', [
+  await shell('bash', [
     '-c',
     '$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)',
   ]);
