@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        
+
         bootstrap = pkgs.writeScriptBin "bootstrap" ''
           #!${pkgs.bash}/bin/bash
           export PATH=${pkgs.lib.makeBinPath [
@@ -19,16 +19,19 @@
             pkgs.git
             pkgs.openssh
             pkgs.coreutils
-            "/bin"
           ]}
 
+          # Change to the directory containing the script and other files
+          cd ${./src}
+
           exec ${pkgs.deno}/bin/deno run \
-            --allow-run \
             --allow-env \
-            --allow-read \
-            --allow-write \
             --allow-net \
-            ${./bootstrap.ts}
+            --allow-read \
+            --allow-run \
+            --allow-sys \
+            --allow-write \
+            bootstrap.ts
         '';
 
       in
@@ -37,6 +40,8 @@
           inherit bootstrap;
           default = bootstrap;
         };
+
+        src = ./src;
       }
     );
 }
