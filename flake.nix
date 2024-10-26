@@ -15,12 +15,13 @@
           #!${pkgs.bash}/bin/bash
           set -e
           export PATH=${pkgs.lib.makeBinPath [
-            pkgs.deno
-            pkgs.curl
-            pkgs.git
-            pkgs.openssh
+            pkgs.bash
             pkgs.coreutils
+            pkgs.curl
+            pkgs.deno
+            pkgs.git
             pkgs.nix
+            pkgs.openssh
           ]}
 
           # Change to the directory containing the script and other files

@@ -1,11 +1,5 @@
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 
-export const commandResultSchema = z.object({
-  success: z.boolean(),
-  stdout: z.string(),
-  stderr: z.string(),
-});
-
 export const repositorySchema = z.object({
   url: z
     .string()

@@ -1,4 +1,5 @@
 {
+  "schema": "https://raw.githubusercontent.com/denoland/deno/main/cli/schemas/config-file.v1.json",
   "tasks": {
     "check": "deno check bootstrap.ts",
     "lint": "deno lint bootstrap.ts",
@@ -21,7 +22,6 @@
         "default-param-last",
         "eqeqeq",
         "explicit-function-return-type",
-        "explicit-module-boundary-types",
         "no-const-assign",
         "no-eval",
         "no-implicit-declare-namespace-export",
