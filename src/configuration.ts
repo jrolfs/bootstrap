@@ -13,7 +13,7 @@ export const configuration = configurationSchema.parse({
     ],
   },
   homeshick: {
-    remote: 'git://github.com/andsens/homeshick.git',
+    remote: 'https://github.com/andsens/homeshick.git',
   },
 });
 
