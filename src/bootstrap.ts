@@ -21,8 +21,6 @@ const ensureHomebrew = async () => {
 
   const installScript = await response.text();
 
-  console.log('Installing Homebrew. This may take a while...');
-  
   const command = new Deno.Command(bashPath.trim(), {
     args: ['-c', installScript],
     env: {
@@ -36,9 +34,7 @@ const ensureHomebrew = async () => {
 
   const { success } = await command.output();
 
-  if (!success) {
-    throw new Error('Homebrew installation failed');
-  }
+  if (!success) throw new Error('Homebrew installation failed');
 
   console.log('Homebrew installation complete.');
 };
@@ -69,6 +65,26 @@ const setupSSHKey = async () => {
   await uploadGitHubKey(publicKey);
 };
 
+const addKnownHosts = async () => {
+  const { HOME } = environment();
+  const knownHostsPath = `${HOME}/.ssh/known_hosts`;
+
+  await Deno.mkdir(`${HOME}/.ssh`, { recursive: true });
+
+  const knownHosts = await Deno.readTextFile(knownHostsPath).catch(() => '');
+
+  for (const host of configuration.knownHosts) {
+    if (knownHosts.includes(host)) {
+      console.log(`✓ ${host} already in known_hosts`);
+      continue;
+    }
+
+    console.log(`Adding ${host} to known_hosts...`);
+    const { stdout } = await shell('ssh-keyscan', [host]);
+    await Deno.writeTextFile(knownHostsPath, stdout, { append: true });
+  }
+};
+
 const setupHomeshick = async () => {
   const { HOME } = environment();
   const homeshickPath = `${HOME}/.homesick/repos/homeshick`;
@@ -84,6 +100,8 @@ const setupHomeshick = async () => {
     ]);
   }
 
+  const homeshick = `source ${homeshickPath}/homeshick.sh && homeshick`;
+
   await Promise.all(
     configuration.github.repositories.map(
       async (repository) => {
@@ -92,15 +110,12 @@ const setupHomeshick = async () => {
         if (await pathExists(repositoryPath)) {
           console.log(`✓ ${repository.name} already cloned, pulling...`);
 
-          await shell('bash', [
-            '-c',
-            `source ${homeshickPath}/homeshick.sh && homeshick pull ${repository.name}`,
-          ]);
+          await shell('bash', ['-c', `${homeshick} pull ${repository.name}`]);
         } else {
           console.log(`Cloning ${repository.name}...`);
           await shell('bash', [
             '-c',
-            `source ${homeshickPath}/homeshick.sh && homeshick clone -b ${repository.url}`,
+            `${homeshick} clone -b ${repository.url}`,
           ]);
         }
       },
@@ -108,10 +123,7 @@ const setupHomeshick = async () => {
   );
 
   console.log('Linking dotfiles...');
-  await shell('bash', [
-    '-c',
-    `source ${homeshickPath}/homeshick.sh && homeshick link`,
-  ]);
+  await shell('bash', ['-c', `${homeshick} link`]);
 };
 
 const bootstrap = async () => {
@@ -120,6 +132,7 @@ const bootstrap = async () => {
 
     await setupSSHKey();
     await ensureHomebrew();
+    await addKnownHosts();
     await setupHomeshick();
 
     console.log('✨ Bootstrap complete!');

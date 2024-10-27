@@ -1,6 +1,7 @@
 import { configurationSchema, environmentSchema } from './schemas.ts';
 
 export const configuration = configurationSchema.parse({
+  knownHosts: ['github.com'],
   github: {
     user: 'jrolfs',
     email: 'jamie.rolfs@gmail.com',

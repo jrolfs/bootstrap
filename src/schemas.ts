@@ -29,6 +29,7 @@ export const accessTokenResponseSchema = z.union([
 ]);
 
 export const configurationSchema = z.object({
+  knownHosts: z.array(z.string()),
   github: z.object({
     user: z.string(),
     email: z.string().email(),
