@@ -4,14 +4,35 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    darwin = {
+      url = "github:LnL7/nix-darwin";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, ... }:
+  outputs = { self, nixpkgs, flake-utils, darwin, ... }@inputs:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        bootstrap = pkgs.writeScriptBin "bootstrap" ''
+        darwinInstaller = pkgs.writeScriptBin "darwin-installer" ''
+          #!${pkgs.bash}/bin/bash
+          set -e
+          
+          INSTALLER_RESULT=$(mktemp -d)
+          cd "$INSTALLER_RESULT"
+          
+          # Build the installer in the temp directory
+          nix-build https://github.com/LnL7/nix-darwin/archive/master.tar.gz -A installer
+          
+          # Run the installer
+          ./result/bin/darwin-installer
+          
+          # Clean up
+          rm -rf "$INSTALLER_RESULT"
+        '';
+
+        bootstrap = pkgs: darwinInstaller: pkgs.writeScriptBin "bootstrap" ''
           #!${pkgs.bash}/bin/bash
           set -e
 
@@ -32,10 +53,11 @@
             pkgs.which
           ]}
 
-          # Change to the directory containing the script and other files
+          # Make the darwin installer available to the bootstrap script
+          export DARWIN_INSTALLER="${darwinInstaller}"
+
           cd ${./src}
 
-          # Run the bootstrap script
           ${pkgs.deno}/bin/deno run \
             --allow-env \
             --allow-net \
@@ -44,34 +66,23 @@
             --allow-sys \
             --allow-write \
             bootstrap.ts
-
-          # Check if nix-darwin is installed
-          if [ ! -f /run/current-system/sw/bin/darwin-rebuild ]; then
-            echo "nix-darwin is not installed. Installing..."
-            ${pkgs.nix}/bin/nix-build https://github.com/LnL7/nix-darwin/archive/master.tar.gz -A installer
-            ./result/bin/darwin-installer
-          else
-            echo "nix-darwin is already installed."
-          fi
-
-          # Rebuild the system using the non-flake configuration
-          if [ -f /run/current-system/sw/bin/darwin-rebuild ]; then
-            echo "Rebuilding the system..."
-            /run/current-system/sw/bin/darwin-rebuild switch
-          else
-            echo "Error: darwin-rebuild not found after installation attempt."
-            exit 1
-          fi
         '';
 
       in
       {
         packages = {
           inherit bootstrap;
-          default = bootstrap;
+          default = bootstrap pkgs darwinInstaller;
         };
 
         src = ./src;
+
+        apps = {
+          bootstrap = {
+            type = "app";
+            program = "${bootstrap pkgs darwinInstaller}/bin/bootstrap";
+          };
+        };
       }
     );
 }
