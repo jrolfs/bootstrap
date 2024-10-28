@@ -49,6 +49,7 @@
             pkgs.deno
             pkgs.findutils
             pkgs.git
+            pkgs.git-lfs
             pkgs.gnused
             pkgs.nix
             pkgs.openssh
