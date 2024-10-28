@@ -124,7 +124,7 @@ const setupHomeshick = async () => {
   );
 
   console.log('Linking dotfiles...');
-  await shell('bash', ['-c', `${homeshick} link`, '--force']);
+  await shell('bash', ['-c', `${homeshick} link --force`]);
 };
 
 const bootstrap = async () => {
