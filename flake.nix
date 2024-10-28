@@ -47,7 +47,9 @@
             pkgs.coreutils
             pkgs.curl
             pkgs.deno
+            pkgs.findutils
             pkgs.git
+            pkgs.gnused
             pkgs.nix
             pkgs.openssh
             pkgs.which
