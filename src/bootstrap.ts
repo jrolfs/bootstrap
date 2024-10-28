@@ -3,7 +3,7 @@ import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 import { configuration, environment } from './configuration.ts';
 import { uploadGitHubKey } from './github.ts';
 import { pathExists, shell } from './helpers.ts';
-import { buildNixDarwin, ensureNixDarwin } from './nix.ts';
+import { ensureNixDarwin } from './nix.ts';
 
 const ensureHomebrew = async () => {
   if (await pathExists('/opt/homebrew')) {
@@ -136,7 +136,6 @@ const bootstrap = async () => {
     await addKnownHosts();
     await setupHomeshick();
     await ensureNixDarwin();
-    await buildNixDarwin();
 
     console.log('✨ Bootstrap complete!');
   } catch (error) {
