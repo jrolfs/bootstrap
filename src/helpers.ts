@@ -1,4 +1,10 @@
-import { blue, bold, red, green, gray } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
+import {
+  blue,
+  bold,
+  gray,
+  green,
+  red,
+} from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 const decoder = new TextDecoder();
 
@@ -110,4 +116,33 @@ export const reportApiError = async (response: Response) => {
     red(`${bold(response.status.toString())}: ${response.statusText}\n`),
     red(await response.text()),
   );
+};
+
+export const openBrowser = async (url: string) => {
+  const supported = ['windows', 'darwin', 'linux'] as const;
+  type Supported = typeof supported[number];
+
+  const isSupported = (os: string): os is Supported =>
+    supported.includes(os as Supported);
+
+  const openCommands = {
+    windows: { cmd: 'cmd', args: ['/c', 'start'] },
+    darwin: { cmd: 'open', args: [] },
+    linux: { cmd: 'xdg-open', args: [] },
+  };
+
+  const os = Deno.build.os;
+
+  if (!isSupported(os)) {
+    console.error(`openBrowser: unsupported operating system "${os}"`);
+    return;
+  }
+
+  const { cmd, args } = openCommands[os] ?? openCommands.linux;
+
+  try {
+    await new Deno.Command(cmd, { args: [...args, url] }).output();
+  } catch (_) {
+    console.log('openBrowser: failed to open browser automatically');
+  }
 };

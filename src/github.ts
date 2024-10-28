@@ -6,7 +6,7 @@ import {
   githubKeysResponseSchema
 } from './schemas.ts';
 import { configuration, environment } from './configuration.ts';
-import { reportApiError } from './helpers.ts';
+import { openBrowser, reportApiError } from './helpers.ts';
 
 const DEVICE_CODE_FILE = `${Deno.env.get('HOME')}/.bootstrap/device-code.json`;
 
@@ -145,6 +145,8 @@ const authenticateGitHub = async (clientId: string) => {
   console.log('\nTo authenticate with GitHub:');
   console.log(`1. Visit: ${deviceCode.verification_uri}`);
   console.log(`2. Enter code: ${deviceCode.user_code}\n`);
+
+  await openBrowser(deviceCode.verification_uri);
 
   githubAccessToken = await pollForToken(
     clientId,
