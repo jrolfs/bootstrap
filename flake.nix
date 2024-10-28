@@ -58,7 +58,7 @@
 
           # Make the darwin installer available to the bootstrap script
           export DARWIN_INSTALLER="${darwinInstaller}"
-          export NIX_MACOS_EXCLUDE_CASKS="1password,firefox,google-chrome,zoom,Xcode"
+          export NIX_MACOS_EXCLUDE_CASKS="1password,firefox,google-chrome,slack,Xcode,zoom"
 
           cd ${./src}
 
