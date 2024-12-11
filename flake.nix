@@ -23,10 +23,10 @@
           cd "$INSTALLER_RESULT"
           
           # Build the installer in the temp directory
-          nix-build https://github.com/LnL7/nix-darwin/archive/master.tar.gz -A installer
+          nix-build https://github.com/LnL7/nix-darwin/archive/master.tar.gz -A darwin-rebuild
           
           # Run the installer
-          ./result/bin/darwin-installer
+          ./result/bin/darwin-rebuild switch --show-trace
           
           # Clean up
           rm -rf "$INSTALLER_RESULT"
