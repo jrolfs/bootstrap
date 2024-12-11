@@ -25,6 +25,9 @@
           # Build the installer in the temp directory
           nix-build https://github.com/LnL7/nix-darwin/archive/master.tar.gz -A darwin-rebuild
           
+          # I manually keep nixpkgs and nix-darwin cloned as submodules instead of using channels so that I can pin them to a specific revision
+          export NIX_PATH=darwin="$HOME/.nix-defexpr/darwin:darwin-config=$HOME/.nixpkgs/darwin-configuration.nix:nixpkgs=$HOME/.nix-defexpr/nixpkgs"
+
           # Run the installer
           ./result/bin/darwin-rebuild switch --show-trace
           
