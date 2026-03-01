@@ -25,11 +25,15 @@ function ensure_comand_line_tools() {
 function ensure_nix() {
   if [[ -d "/nix" ]]; then
     echo "✓ Nix already installed"
-    return 0
+  else
+    echo "Installing Nix..."
+    curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
   fi
 
-  echo "Installing Nix..."
-  curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+  # Source the nix profile so `nix` is available in this shell session
+  if [[ -e "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" ]]; then
+    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+  fi
 }
 
 function ensure_repository() {
