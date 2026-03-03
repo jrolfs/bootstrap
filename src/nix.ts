@@ -26,7 +26,8 @@ export const ensureNixDarwin = async () => {
   }
 
   // nix-darwin has no separate installer; first darwin-rebuild switch installs it
-  await shell('sudo', [
+  // Use full path: Nix run environment has a minimal PATH and does not include /usr/bin
+  await shell('/usr/bin/sudo', [
     '-E',
     'nix',
     'run',
