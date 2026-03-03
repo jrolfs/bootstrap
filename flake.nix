@@ -15,24 +15,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        darwinInstaller = pkgs.writeScriptBin "darwin-installer" ''
-          #!${pkgs.bash}/bin/bash
-          set -e
-          
-          INSTALLER_RESULT=$(mktemp -d)
-          cd "$INSTALLER_RESULT"
-          
-          # Build the installer in the temp directory
-          nix-build https://github.com/LnL7/nix-darwin/archive/master.tar.gz -A installer
-          
-          # Run the installer
-          ./result/bin/darwin-installer
-          
-          # Clean up
-          rm -rf "$INSTALLER_RESULT"
-        '';
-
-        bootstrap = pkgs: darwinInstaller: pkgs.writeScriptBin "bootstrap" ''
+        bootstrap = pkgs: pkgs.writeScriptBin "bootstrap" ''
           #!${pkgs.bash}/bin/bash
           set -e
 
@@ -56,8 +39,6 @@
             pkgs.which
           ]}
 
-          # Make the darwin installer available to the bootstrap script
-          export DARWIN_INSTALLER="${darwinInstaller}"
           export NIX_MACOS_EXCLUDE_CASKS="1password,firefox,google-chrome,slack,Xcode,zoom"
 
           cd ${./src}
@@ -76,7 +57,7 @@
       {
         packages = {
           inherit bootstrap;
-          default = bootstrap pkgs darwinInstaller;
+          default = bootstrap pkgs;
         };
 
         src = ./src;
@@ -84,7 +65,7 @@
         apps = {
           bootstrap = {
             type = "app";
-            program = "${bootstrap pkgs darwinInstaller}/bin/bootstrap";
+            program = "${bootstrap pkgs}/bin/bootstrap";
           };
         };
       }

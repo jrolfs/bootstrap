@@ -44,7 +44,6 @@ export const configurationSchema = z.object({
 
 export const environmentSchema = z.object({
   HOME: z.string().min(1),
-  DARWIN_INSTALLER: z.string().min(1),
 });
 
 export const githubKeysResponseSchema = z.array(z.object({

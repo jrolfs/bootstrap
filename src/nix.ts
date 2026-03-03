@@ -1,9 +1,11 @@
 import { environment } from './configuration.ts';
-import { pathExists } from './helpers.ts';
+import { pathExists, shell } from './helpers.ts';
+
+const darwinConfigPath = (home: string) =>
+  `${home}/.nixpkgs/darwin-configuration.nix`;
 
 export const ensureNixDarwin = async () => {
   const darwinRebuildPath = '/run/current-system/sw/bin/darwin-rebuild';
-
   const installed = await pathExists(darwinRebuildPath);
 
   if (installed) {
@@ -14,14 +16,24 @@ export const ensureNixDarwin = async () => {
 
   console.log('Rebuilding nix-darwin system...');
 
-  const { DARWIN_INSTALLER: installer } = environment();
+  const { HOME } = environment();
+  const darwinConfig = darwinConfigPath(HOME);
 
-  const install = new Deno.Command(`${installer}/bin/darwin-installer`, {
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
+  if (!(await pathExists(darwinConfig))) {
+    throw new Error(
+      `darwin-configuration.nix not found at ${darwinConfig}. Ensure homeshick has linked your dotfiles.`,
+    );
+  }
 
-  const { success } = await install.output();
-
-  if (!success) throw new Error('Failed to install nix-darwin');
+  // nix-darwin has no separate installer; first darwin-rebuild switch installs it
+  await shell('sudo', [
+    '-E',
+    'nix',
+    'run',
+    'github:LnL7/nix-darwin#darwin-rebuild',
+    '--',
+    'switch',
+    '-I',
+    `darwin-config=${darwinConfig}`,
+  ]);
 };
