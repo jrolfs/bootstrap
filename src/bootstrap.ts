@@ -6,7 +6,11 @@ import { pathExists, shell } from './helpers.ts';
 import { ensureHostname } from './hostname.ts';
 import { ensureSystemRebuild } from './nix.ts';
 import { ensureOpAuthenticated, ensureOpInstalled } from './onepassword.ts';
-import { configureResilio, waitForResilioSync } from './resilio.ts';
+import {
+  configureResilio,
+  restoreMackup,
+  waitForResilioSync,
+} from './resilio.ts';
 import { hasPhase, loadState, recordPhase, runPhase } from './state.ts';
 import type { State } from './schemas.ts';
 
@@ -312,6 +316,18 @@ const bootstrap = async (): Promise<void> => {
       'First darwin-rebuild/nixos-rebuild switch',
       async () => {
         await ensureSystemRebuild();
+      },
+    );
+
+    // mackup restore runs after the switch — mackup is installed by the switch,
+    // and the ~/Configuration/mackup store must have synced. Confirmed +
+    // best-effort; no-op if either isn't ready (run `mkrs` later).
+    state = await runPhase(
+      state,
+      'mackup-restored',
+      'mackup restore from ~/Configuration',
+      async () => {
+        await restoreMackup();
       },
     );
 

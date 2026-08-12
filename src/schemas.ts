@@ -97,6 +97,7 @@ export const phaseSchema = z.enum([
   'vscode-sync-cloned',
   'resilio-configured',
   'first-switch-completed',
+  'mackup-restored',
 ]);
 
 export const stateSchema = z.object({

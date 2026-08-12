@@ -1,4 +1,5 @@
 import { ensureDir } from 'https://deno.land/std@0.192.0/fs/mod.ts';
+import { blue, bold, gray } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 import { configuration, environment } from './configuration.ts';
 import { pathExists, shell } from './helpers.ts';
@@ -136,15 +137,13 @@ const buildSyncConf = (secret: string, sharePath: string): SyncConfFile => ({
  * `shared_folders` array (idempotency); otherwise we write a fresh file.
  */
 const seedSyncConf = async (
-  resilio: ResilioConfiguration,
+  secret: string,
+  sharePath: string,
   home: string,
 ): Promise<void> => {
   const supportDir = `${home}/${RESILIO_SUPPORT_DIR}`;
   const syncConfPath = `${supportDir}/${SYNC_CONF_NAME}`;
   await ensureDir(supportDir);
-
-  const secret = await readConfigShareSecret(resilio, home);
-  const sharePath = expandHome(home, resilio.configSharePath);
 
   if (await pathExists(syncConfPath)) {
     const existingRaw = await Deno.readTextFile(syncConfPath);
@@ -192,8 +191,16 @@ const seedSyncConf = async (
 };
 
 /**
- * Installs Resilio Sync, pre-seeds `sync.conf` with the configuration share,
- * and launches the app so the daemon begins syncing.
+ * Installs Resilio Sync, best-effort pre-seeds `sync.conf` with the
+ * configuration share, launches the app, and walks the user through the
+ * first-run + folder-add if needed.
+ *
+ * Why the guided manual step: the pre-seeded `sync.conf` is the documented
+ * path for the headless `rslsync` daemon, but the macOS **GUI** app manages
+ * its folder list in its own storage and shows a first-run EULA, so the seed
+ * may not take. Rather than silently assume it worked, we surface the secret
+ * and pause so the folder can be added by hand when necessary — the step is
+ * part of the process, not an undocumented gap.
  */
 export const configureResilio = async (): Promise<void> => {
   const resilio = configuration.resilio;
@@ -209,15 +216,82 @@ export const configureResilio = async (): Promise<void> => {
   }
 
   const { HOME } = environment();
+  const sharePath = expandHome(HOME, resilio.configSharePath);
 
   await ensureResilioInstalled();
-  await seedSyncConf(resilio, HOME);
 
-  // Launch Resilio Sync so the daemon picks up the pre-seeded sync.conf.
-  // `open -g` keeps the launch in the background; the wait helper below
-  // observes the sync progress separately.
+  const secret = await readConfigShareSecret(resilio, HOME);
+  await ensureDir(sharePath);
+  await seedSyncConf(secret, sharePath, HOME);
+
+  // Foreground launch so the user can accept the EULA / complete first-run
+  // and, if the pre-seed didn't take, add the share manually.
   console.log('Launching Resilio Sync...');
-  await shell('open', ['-g', RESILIO_APP_PATH], { error: false });
+  await shell('open', [RESILIO_APP_PATH], { error: false });
+
+  const wrap = 80;
+  console.log(
+    '\n\n',
+    `📁 ${bold('Resilio Sync — add the configuration share')}\n`,
+    blue('‾'.repeat(wrap)),
+    '\n',
+    gray(
+      ' If Resilio just opened to a first-run screen, accept the EULA (Standard\n' +
+        ' setup is fine). Then confirm the folder below is present and syncing —\n' +
+        ' the pre-seeded sync.conf usually adds it, but the GUI app may need it\n' +
+        ' added by hand:\n',
+    ),
+    `\n   folder: ${bold(sharePath)}\n`,
+    `   secret: ${bold(secret)}\n\n`,
+    gray(
+      ' To add manually: Resilio → "+" → "Enter a key or link" → paste the\n' +
+        ` secret above → choose "${sharePath}" as the folder.`,
+    ),
+  );
+
+  // Pause until the user confirms the share is set up. `prompt` returns null
+  // on a non-interactive stdin, which is fine — waitForResilioSync then
+  // polls for the sentinel regardless.
+  prompt('\n Press Enter once the ~/Configuration folder is syncing in Resilio…');
+};
+
+const MACKUP_PATH = '/run/current-system/sw/bin/mackup';
+
+/**
+ * Restores app preferences from the synced `~/Configuration/mackup` store via
+ * mackup, after the first system switch has installed mackup. Confirmed and
+ * best-effort: skips cleanly if mackup isn't on the system yet or the synced
+ * store hasn't arrived, so the user can always run `mkrs` later.
+ */
+export const restoreMackup = async (): Promise<void> => {
+  const resilio = configuration.resilio;
+  if (!resilio?.enabled || Deno.build.os !== 'darwin') return;
+
+  const { HOME } = environment();
+  const sharePath = expandHome(HOME, resilio.configSharePath);
+  const mackupDir = `${sharePath}/mackup`;
+
+  if (!(await pathExists(mackupDir))) {
+    console.log(`No ${mackupDir} yet; skipping mackup restore (run \`mkrs\` later)`);
+    return;
+  }
+
+  if (!(await pathExists(MACKUP_PATH))) {
+    console.log(
+      'mackup not installed on the system yet; skipping restore (run `mkrs` later)',
+    );
+    return;
+  }
+
+  const ok = confirm(
+    'Restore app preferences from ~/Configuration via mackup now? (mackup restore -f)',
+  );
+  if (!ok) {
+    console.log('Skipped mackup restore; run `mkrs` when ready.');
+    return;
+  }
+
+  await shell(MACKUP_PATH, ['restore', '-f']);
 };
 
 /**
