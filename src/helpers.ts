@@ -102,6 +102,32 @@ export const shell = async (
   }
 };
 
+/**
+ * Copies text to the macOS clipboard via `pbcopy`.
+ *
+ * The value is written to stdin rather than passed as an argument so it never
+ * appears in the process table, and it is deliberately not logged.
+ *
+ * @param value Text to place on the clipboard
+ *
+ * @returns Whether the copy succeeded
+ */
+export const copyToClipboard = async (value: string): Promise<boolean> => {
+  try {
+    const child = new Deno.Command('/usr/bin/pbcopy', { stdin: 'piped' })
+      .spawn();
+
+    const writer = child.stdin.getWriter();
+    await writer.write(new TextEncoder().encode(value));
+    await writer.close();
+
+    const { success } = await child.status;
+    return success;
+  } catch {
+    return false;
+  }
+};
+
 export const pathExists = async (path: string) => {
   try {
     await Deno.stat(path);

@@ -1,8 +1,9 @@
 import { blue, bold, gray } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 import { configuration, environment } from './configuration.ts';
-import { pathExists, shell } from './helpers.ts';
+import { copyToClipboard, pathExists, shell } from './helpers.ts';
 import { bin, requireBrewBinary } from './system.ts';
+import { readSecret } from './onepassword.ts';
 
 const RESILIO_APP_PATH = '/Applications/Resilio Sync.app';
 
@@ -44,6 +45,45 @@ const ensureResilioInstalled = async (): Promise<void> => {
 };
 
 /**
+ * Fetches the optional Resilio linking code from 1Password and places it on the
+ * clipboard, so the GUI linking step is a paste instead of a second-device trip.
+ *
+ * Never throws: linking codes are short-lived, so a missing/stale reference or
+ * an unauthenticated `op` just means falling back to approving from an
+ * already-linked device. The code is not printed — it goes to the clipboard
+ * only, keeping it out of the terminal scrollback.
+ *
+ * @param reference 1Password secret reference, when configured
+ *
+ * @returns Whether a code was successfully copied
+ */
+const copyLinkingCode = async (reference?: string): Promise<boolean> => {
+  if (!reference) return false;
+
+  try {
+    const code = await readSecret(reference);
+    if (!code) return false;
+
+    const copied = await copyToClipboard(code);
+
+    console.log(
+      copied
+        ? '✓ Resilio linking code copied to the clipboard (paste with ⌘V)'
+        : 'Could not copy the Resilio linking code to the clipboard',
+    );
+
+    return copied;
+  } catch (error) {
+    console.log(
+      `Could not read the Resilio linking code (${
+        error instanceof Error ? error.message.split('\n')[0] : error
+      }); link by approving from another device instead.`,
+    );
+    return false;
+  }
+};
+
+/**
  * Installs Resilio Sync and walks the user through linking this machine to
  * their Resilio *identity*, which brings all of the identity's shares with it.
  *
@@ -76,11 +116,24 @@ export const configureResilio = async (): Promise<void> => {
 
   await ensureResilioInstalled();
 
+  // If a linking code is stashed in 1Password, put it on the clipboard so the
+  // GUI step is a paste rather than a trip to another device. Best-effort: a
+  // missing or stale reference must not fail the phase, since approving from
+  // an already-linked device always remains a valid path.
+  const codeCopied = await copyLinkingCode(resilio.linkingCodeOpReference);
+
   // Foreground launch so the user can complete first-run and device linking.
   console.log('Launching Resilio Sync...');
   await shell(bin.open, [RESILIO_APP_PATH], { error: false });
 
   const wrap = 80;
+  const linkStep = codeCopied
+    ? '   1. Choose to link/connect with an existing identity, then paste the\n' +
+      '      linking code with ⌘V — it is already on your clipboard.\n'
+    : '   1. Choose to link/connect with an existing identity (during\n' +
+      '      first-run setup, or Preferences -> Identity afterwards), then\n' +
+      '      approve the request from an already-linked device.\n';
+
   console.log(
     '\n\n',
     `📁 ${bold('Resilio Sync — link this device to your identity')}\n`,
@@ -90,10 +143,8 @@ export const configureResilio = async (): Promise<void> => {
       ' Resilio just opened. Accept the EULA if prompted, then link this\n' +
         ' machine to your existing identity rather than creating a new one:\n' +
         '\n' +
-        '   1. Choose to link/connect with an existing identity (during\n' +
-        '      first-run setup, or Preferences -> Identity afterwards).\n' +
-        '   2. Approve the request from an already-linked device.\n' +
-        '   3. Once linked, the identity\'s shares appear automatically —\n' +
+        linkStep +
+        '   2. Once linked, the identity\'s shares appear automatically —\n' +
         `      including the one that syncs ${sharePath}.\n`,
     ),
   );

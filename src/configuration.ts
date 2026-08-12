@@ -27,6 +27,13 @@ export const configuration = configurationSchema.parse({
     // No share secret: devices are linked to a Resilio *identity*, which
     // carries its shares with it. See src/resilio.ts.
     configSharePath: '~/Configuration',
+    // Optional: a 1Password reference to a Resilio device linking code. When
+    // set, bootstrap copies the code to the clipboard before opening Resilio so
+    // linking is a ⌘V instead of a trip to another device. Codes are
+    // short-lived — generate one on a linked device and stash it just before
+    // provisioning. Left unset until such an item exists; absence just falls
+    // back to approving from another device.
+    // linkingCodeOpReference: 'op://Private/<item-uuid>/<field-uuid>',
   },
 });
 

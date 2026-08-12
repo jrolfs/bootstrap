@@ -39,6 +39,22 @@ export const resilioConfigurationSchema = z.object({
    * linked to a Resilio identity, which brings its shares along.
    */
   configSharePath: z.string().default('~/Configuration'),
+  /**
+   * Optional 1Password reference to a Resilio device *linking code*.
+   *
+   * Linking still has to be completed in the GUI (there's no CLI for it), but
+   * when this is set the code is fetched and printed for copy-paste, so a
+   * second device isn't needed mid-run. Generate the code on an already-linked
+   * device and store it here shortly before provisioning — codes are
+   * short-lived, so a stale one simply falls back to approving from another
+   * device.
+   *
+   * Accepts a fully qualified `op://Vault/Item/field` reference or a short
+   * `Item/field` / `Vault/Item/field` form resolved against
+   * `onePassword.vault`. Note a reference cannot contain `/` or `&`, so items
+   * or fields with those in their names must be addressed by UUID.
+   */
+  linkingCodeOpReference: z.string().min(1).optional(),
 });
 
 export const onePasswordConfigurationSchema = z.object({

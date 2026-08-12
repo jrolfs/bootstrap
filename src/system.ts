@@ -17,6 +17,7 @@ export const bin = {
   dscacheutil: '/usr/bin/dscacheutil',
   killall: '/usr/bin/killall',
   open: '/usr/bin/open',
+  pbcopy: '/usr/bin/pbcopy',
 } as const;
 
 const BREW_PREFIXES = ['/opt/homebrew', '/usr/local'] as const;
