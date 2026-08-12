@@ -16,6 +16,20 @@ const ONEPASSWORD_GUI_APP_PATH = '/Applications/1Password 8.app';
 const requireOp = (): Promise<string> => requireBrewBinary('op');
 
 /**
+ * Session token captured from a headless `op signin --raw`.
+ *
+ * Passed explicitly as `--session` to subsequent `op` calls rather than
+ * exported as `OP_SESSION_<name>`, because the env-var name depends on the
+ * account (shorthand vs UUID across `op` versions) while `--session` is
+ * unambiguous. Unused on the GUI-integration path, where `op` gets sessions
+ * from the desktop app and no token is involved.
+ */
+let sessionToken: string | null = null;
+
+const withSession = (args: readonly string[]): string[] =>
+  sessionToken ? [...args, '--session', sessionToken] : [...args];
+
+/**
  * Reusable interface to the 1Password CLI (`op`).
  *
  * This module is intentionally generic: bootstrap modules that need secrets
@@ -81,8 +95,23 @@ export const ensureOpInstalled = async (): Promise<void> => {
 const isOpAuthenticated = async (): Promise<boolean> => {
   const op = await findBrewBinary('op');
   if (!op) return false;
-  const result = await shell(op, ['whoami'], { error: false });
+  const result = await shell(op, withSession(['whoami']), { error: false });
   return result.success;
+};
+
+/**
+ * True when `op` already has the given account configured (i.e. a previous
+ * `op account add` succeeded, possibly in an earlier bootstrap run).
+ */
+const opAccountExists = async (shorthand: string): Promise<boolean> => {
+  const op = await findBrewBinary('op');
+  if (!op) return false;
+
+  const result = await shell(op, ['account', 'list'], { error: false });
+  if (!result.success) return false;
+
+  return result.stdout.includes(shorthand) ||
+    result.stdout.trim().split('\n').length > 1;
 };
 
 /**
@@ -154,39 +183,58 @@ const guideHeadlessSignin = async (): Promise<string> => {
 
   // `op account add` is interactive on its own (prompts for sign-in address,
   // email, secret key, password). We hand stdin/stdout straight through.
-  console.log(
-    gray(
-      `Running \`op account add --shorthand ${shorthand}\` — follow the prompts.`,
-    ),
-  );
+  // Skipped when the account is already configured, which is the case on any
+  // re-run after a previously successful add.
+  if (await opAccountExists(shorthand)) {
+    console.log(gray(`✓ 1Password account already added; skipping account add`));
+  } else {
+    console.log(
+      gray(
+        `Running \`op account add --shorthand ${shorthand}\` — follow the prompts.`,
+      ),
+    );
 
-  const add = new Deno.Command(await requireOp(), {
-    args: ['account', 'add', '--shorthand', shorthand],
-    stdin: 'inherit',
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
-  const { success: addSuccess } = await add.output();
-  if (!addSuccess) {
-    throw new Error('`op account add` failed; cannot continue 1Password setup');
+    const add = new Deno.Command(await requireOp(), {
+      args: ['account', 'add', '--shorthand', shorthand],
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
+    const { success: addSuccess } = await add.output();
+    if (!addSuccess) {
+      throw new Error(
+        '`op account add` failed; cannot continue 1Password setup',
+      );
+    }
   }
 
-  // `op signin --account <shorthand>` prints `export OP_SESSION_<id>=...` to
-  // stdout. We capture and surface guidance for the user; once GUI
-  // integration is configured this branch is rarely needed.
+  // `--raw` prints just the session token. Plain `op signin` prints
+  // `export OP_SESSION_…=…` and refuses to run unless it believes the output
+  // will be eval'd by a shell ("Output of 'op signin' is meant to be executed
+  // by your terminal"), which is useless from a subprocess. Capture the token
+  // instead and pass it as `--session` on later calls (see `withSession`).
+  // stdin/stderr stay attached so the password prompt works.
   console.log(
-    gray(`Running \`op signin --account ${shorthand}\` — follow the prompts.`),
+    gray(`Running \`op signin --account ${shorthand} --raw\` — follow the prompts.`),
   );
   const signin = new Deno.Command(await requireOp(), {
-    args: ['signin', '--account', shorthand],
+    args: ['signin', '--account', shorthand, '--raw'],
     stdin: 'inherit',
-    stdout: 'inherit',
+    stdout: 'piped',
     stderr: 'inherit',
   });
-  const { success: signinSuccess } = await signin.output();
+  const { success: signinSuccess, stdout } = await signin.output();
   if (!signinSuccess) {
     throw new Error('`op signin` failed; cannot continue 1Password setup');
   }
+
+  const token = new TextDecoder().decode(stdout).trim();
+  if (!token) {
+    throw new Error('`op signin --raw` returned an empty session token');
+  }
+
+  sessionToken = token;
+  console.log('✓ 1Password session captured for this bootstrap run');
 
   return shorthand;
 };
@@ -303,7 +351,7 @@ const normalizeReference = (reference: string): string => {
 const opRead = async (
   reference: string,
 ): Promise<{ success: true; value: string } | { success: false; stderr: string }> => {
-  const result = await shell(await requireOp(), ['read', reference], {
+  const result = await shell(await requireOp(), withSession(['read', reference]), {
     error: false,
   });
   if (result.success) {
