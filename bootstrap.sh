@@ -4,6 +4,9 @@ set -euo pipefail
 
 BOOTSTRAP_DIR="$HOME/.bootstrap"
 OS="$(uname -s)"
+# Branch of this repo to run. Defaults to main; override to test an unmerged
+# branch, e.g. BOOTSTRAP_REF=flake-migration during the flake migration.
+BOOTSTRAP_REF="${BOOTSTRAP_REF:-main}"
 
 function ensure_comand_line_tools() {
   if [[ "$OS" != "Darwin" ]]; then
@@ -47,14 +50,16 @@ function ensure_nix() {
 
 function ensure_repository() {
   if [[ -d "$BOOTSTRAP_DIR" ]]; then
-    echo "Updating bootstrap repository..."
+    echo "Updating bootstrap repository (ref: $BOOTSTRAP_REF)..."
     cd "$BOOTSTRAP_DIR"
-    git pull
+    git fetch origin "$BOOTSTRAP_REF"
+    git checkout "$BOOTSTRAP_REF"
+    git pull --ff-only origin "$BOOTSTRAP_REF"
     return 0
   fi
 
-  echo "Cloning bootstrap repository..."
-  git clone https://github.com/jrolfs/bootstrap.git "$BOOTSTRAP_DIR"
+  echo "Cloning bootstrap repository (ref: $BOOTSTRAP_REF)..."
+  git clone --branch "$BOOTSTRAP_REF" https://github.com/jrolfs/bootstrap.git "$BOOTSTRAP_DIR"
   cd "$BOOTSTRAP_DIR"
 }
 
