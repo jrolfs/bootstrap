@@ -9,7 +9,22 @@ import { configuration } from './configuration.ts';
 import { pathExists, shell } from './helpers.ts';
 import { bin, findBrewBinary, requireBrewBinary } from './system.ts';
 
-const ONEPASSWORD_GUI_APP_PATH = '/Applications/1Password 8.app';
+// Current 1Password 8 installs as `1Password.app`; earlier 8.x releases used
+// `1Password 8.app`. Checking only the latter made `guiInstalled` always false,
+// which silently skipped the (preferred) GUI-integration path and dropped
+// straight into headless signin.
+const ONEPASSWORD_GUI_APP_CANDIDATES = [
+  '/Applications/1Password.app',
+  '/Applications/1Password 8.app',
+] as const;
+
+/** Resolved path to the installed 1Password desktop app, or null. */
+const findGuiApp = async (): Promise<string | null> => {
+  for (const candidate of ONEPASSWORD_GUI_APP_CANDIDATES) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  return null;
+};
 
 // The flake app's PATH excludes the Homebrew prefix, so `op` is never on PATH
 // and `which op` can't find it — resolve it under the brew prefixes instead.
@@ -55,7 +70,7 @@ interface OpInstallationStatus {
  */
 const inspectInstallation = async (): Promise<OpInstallationStatus> => {
   const cliInstalled = (await findBrewBinary('op')) !== null;
-  const guiInstalled = await pathExists(ONEPASSWORD_GUI_APP_PATH);
+  const guiInstalled = (await findGuiApp()) !== null;
   return { cliInstalled, guiInstalled };
 };
 
@@ -157,7 +172,8 @@ const guideGuiIntegration = async (): Promise<void> => {
 
   // Best-effort: open the GUI for the user. Failure is non-fatal — they may
   // already have it open or running.
-  await shell(bin.open, ['-g', ONEPASSWORD_GUI_APP_PATH], { error: false });
+  const app = await findGuiApp();
+  if (app) await shell(bin.open, ['-g', app], { error: false });
 
   await promptLine(yellow('\nPress Enter once GUI integration is enabled... '));
 };
@@ -265,7 +281,7 @@ export const ensureOpAuthenticated = async (): Promise<void> => {
     return;
   }
 
-  const guiInstalled = await pathExists(ONEPASSWORD_GUI_APP_PATH);
+  const guiInstalled = (await findGuiApp()) !== null;
 
   // Loop until `op whoami` succeeds. Each iteration the user can pick the
   // GUI path (fast, no password) or fall through to headless.
