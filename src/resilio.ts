@@ -41,10 +41,17 @@ interface SyncConfFile {
  * The cask is also declared in the nix-config Homebrew set, but bootstrap
  * runs before nix-darwin is activated so we install it eagerly here to
  * pre-seed config before launch.
+ *
+ * macOS only *by implementation*, not because Resilio is macOS-only: on
+ * NixOS the daemon and its shares are declared with `services.resilio`
+ * (`enable` + `sharedFolders`), which is strictly better than seeding a
+ * config file imperatively. See MIGRATION.md (phase 2) for that plan.
  */
 const ensureResilioInstalled = async (): Promise<void> => {
   if (Deno.build.os !== 'darwin') {
-    console.log('Skipping Resilio install on non-darwin host');
+    console.log(
+      'Skipping Resilio install on non-darwin host (NixOS uses services.resilio)',
+    );
     return;
   }
 
