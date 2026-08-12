@@ -293,3 +293,54 @@ export const readSecret = async (reference: string): Promise<string> => {
     `Failed to read 1Password secret ${resolved} after re-auth:\n${second.stderr}`,
   );
 };
+
+/**
+ * Fetches a 1Password *document* (file attachment) by name or `op://Vault/Item`
+ * reference, returning its contents.
+ *
+ * Documents are a separate `op` surface from fields — `op read` handles field
+ * references, `op document get` handles attachments — and are the right home
+ * for multi-line material like an armored key export.
+ *
+ * @param nameOrReference Document title, or `op://Vault/Item`
+ *
+ * @returns The document contents
+ * @throws When `op document get` fails after a re-auth attempt
+ */
+export const readDocument = async (
+  nameOrReference: string,
+): Promise<string> => {
+  const vault = configuration.onePassword?.vault;
+
+  const args = (): string[] => {
+    if (nameOrReference.startsWith('op://')) {
+      return ['document', 'get', nameOrReference];
+    }
+    return vault
+      ? ['document', 'get', nameOrReference, '--vault', vault]
+      : ['document', 'get', nameOrReference];
+  };
+
+  const attempt = async () =>
+    await shell(await requireOp(), args(), { error: false });
+
+  const first = await attempt();
+  if (first.success) return first.stdout;
+
+  console.warn(
+    yellow(
+      `\`op document get\` failed for ${nameOrReference}; ` +
+        `re-authenticating and retrying.\n${first.stderr}`,
+    ),
+  );
+
+  await ensureOpAuthenticated();
+
+  const second = await attempt();
+  if (second.success) return second.stdout;
+
+  throw new Error(
+    `Failed to read 1Password document ${nameOrReference} after re-auth:\n` +
+      second.stderr,
+  );
+};

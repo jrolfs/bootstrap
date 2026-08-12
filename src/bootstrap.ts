@@ -3,6 +3,7 @@ import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 import { configuration, environment, setHostname } from './configuration.ts';
 import { uploadGitHubKey } from './github.ts';
 import { pathExists, shell } from './helpers.ts';
+import { importGpgKeys } from './gpg.ts';
 import { ensureHostname } from './hostname.ts';
 import { ensureSystemRebuild } from './nix.ts';
 import { ensureOpAuthenticated, ensureOpInstalled } from './onepassword.ts';
@@ -302,6 +303,18 @@ const bootstrap = async (): Promise<void> => {
       'Resilio Sync configured',
       async () => {
         await configureResilio();
+      },
+    );
+
+    // GPG keys come from 1Password documents, so this needs `op` authenticated
+    // (earlier phase) but not the system switch. Inert until the references are
+    // configured.
+    state = await runPhase(
+      state,
+      'gpg-imported',
+      'GPG secret key + ownertrust import',
+      async () => {
+        await importGpgKeys();
       },
     );
 

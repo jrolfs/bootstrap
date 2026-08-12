@@ -57,6 +57,28 @@ export const resilioConfigurationSchema = z.object({
   linkingCodeOpReference: z.string().min(1).optional(),
 });
 
+export const gpgConfigurationSchema = z.object({
+  /**
+   * Primary key fingerprint, used as the idempotency check: when `gpg -K`
+   * already lists it, the import is skipped.
+   */
+  fingerprint: z.string().min(1),
+  /**
+   * 1Password *document* holding the armored secret-key export
+   * (`gpg --export-secret-keys --armor`). Piped straight into `gpg --import`,
+   * never written to disk. Keep a passphrase on the key so the export is also
+   * encrypted at rest inside 1Password.
+   *
+   * Accepts `op://Vault/Item` or a name resolved against `onePassword.vault`.
+   */
+  secretKeyOpReference: z.string().min(1).optional(),
+  /**
+   * 1Password document holding `gpg --export-ownertrust` output. Optional —
+   * without it the imported key has no assigned trust.
+   */
+  ownertrustOpReference: z.string().min(1).optional(),
+});
+
 export const onePasswordConfigurationSchema = z.object({
   /**
    * Default vault used to expand short-form secret references (e.g.
@@ -82,6 +104,7 @@ export const configurationSchema = z.object({
   vscodeSyncRepo: githubSshUrl.optional(),
   onePassword: onePasswordConfigurationSchema.optional(),
   resilio: resilioConfigurationSchema.optional(),
+  gpg: gpgConfigurationSchema.optional(),
 });
 
 export const environmentSchema = z.object({
@@ -100,6 +123,7 @@ export const phaseSchema = z.enum([
   'nix-config-cloned',
   'vscode-sync-cloned',
   'resilio-configured',
+  'gpg-imported',
   'first-switch-completed',
   'mackup-restored',
 ]);
@@ -119,6 +143,7 @@ export type Phase = z.infer<typeof phaseSchema>;
 export type State = z.infer<typeof stateSchema>;
 export type Configuration = z.infer<typeof configurationSchema>;
 export type ResilioConfiguration = z.infer<typeof resilioConfigurationSchema>;
+export type GpgConfiguration = z.infer<typeof gpgConfigurationSchema>;
 export type OnePasswordConfiguration = z.infer<
   typeof onePasswordConfigurationSchema
 >;
