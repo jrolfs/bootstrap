@@ -3,6 +3,7 @@ import { blue, bold, gray } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 import { configuration, environment } from './configuration.ts';
 import { pathExists, shell } from './helpers.ts';
+import { bin, requireBrewBinary } from './system.ts';
 import { readSecret } from './onepassword.ts';
 import type { ResilioConfiguration } from './schemas.ts';
 
@@ -53,7 +54,11 @@ const ensureResilioInstalled = async (): Promise<void> => {
   }
 
   console.log('Installing Resilio Sync via Homebrew...');
-  await shell('brew', ['install', '--cask', 'resilio-sync']);
+  await shell(await requireBrewBinary('brew'), [
+    'install',
+    '--cask',
+    'resilio-sync',
+  ]);
 };
 
 /**
@@ -227,7 +232,7 @@ export const configureResilio = async (): Promise<void> => {
   // Foreground launch so the user can accept the EULA / complete first-run
   // and, if the pre-seed didn't take, add the share manually.
   console.log('Launching Resilio Sync...');
-  await shell('open', [RESILIO_APP_PATH], { error: false });
+  await shell(bin.open, [RESILIO_APP_PATH], { error: false });
 
   const wrap = 80;
   console.log(

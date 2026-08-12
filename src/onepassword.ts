@@ -7,8 +7,13 @@ import {
 
 import { configuration } from './configuration.ts';
 import { pathExists, shell } from './helpers.ts';
+import { bin, findBrewBinary, requireBrewBinary } from './system.ts';
 
 const ONEPASSWORD_GUI_APP_PATH = '/Applications/1Password 8.app';
+
+// The flake app's PATH excludes the Homebrew prefix, so `op` is never on PATH
+// and `which op` can't find it — resolve it under the brew prefixes instead.
+const requireOp = (): Promise<string> => requireBrewBinary('op');
 
 /**
  * Reusable interface to the 1Password CLI (`op`).
@@ -35,8 +40,7 @@ interface OpInstallationStatus {
  * Probes the current installation state of the 1Password CLI and GUI.
  */
 const inspectInstallation = async (): Promise<OpInstallationStatus> => {
-  const which = await shell('/usr/bin/which', ['op'], { error: false });
-  const cliInstalled = which.success && which.stdout.trim().length > 0;
+  const cliInstalled = (await findBrewBinary('op')) !== null;
   const guiInstalled = await pathExists(ONEPASSWORD_GUI_APP_PATH);
   return { cliInstalled, guiInstalled };
 };
@@ -63,7 +67,11 @@ export const ensureOpInstalled = async (): Promise<void> => {
   if (!cliInstalled) casks.push('1password-cli');
 
   console.log(`Installing 1Password casks: ${casks.join(', ')}`);
-  await shell('brew', ['install', '--cask', ...casks]);
+  await shell(await requireBrewBinary('brew'), [
+    'install',
+    '--cask',
+    ...casks,
+  ]);
 };
 
 /**
@@ -71,7 +79,9 @@ export const ensureOpInstalled = async (): Promise<void> => {
  * session token (either via GUI integration or a saved `op signin` session).
  */
 const isOpAuthenticated = async (): Promise<boolean> => {
-  const result = await shell('op', ['whoami'], { error: false });
+  const op = await findBrewBinary('op');
+  if (!op) return false;
+  const result = await shell(op, ['whoami'], { error: false });
   return result.success;
 };
 
@@ -118,7 +128,7 @@ const guideGuiIntegration = async (): Promise<void> => {
 
   // Best-effort: open the GUI for the user. Failure is non-fatal — they may
   // already have it open or running.
-  await shell('open', ['-g', ONEPASSWORD_GUI_APP_PATH], { error: false });
+  await shell(bin.open, ['-g', ONEPASSWORD_GUI_APP_PATH], { error: false });
 
   await promptLine(yellow('\nPress Enter once GUI integration is enabled... '));
 };
@@ -150,7 +160,7 @@ const guideHeadlessSignin = async (): Promise<string> => {
     ),
   );
 
-  const add = new Deno.Command('op', {
+  const add = new Deno.Command(await requireOp(), {
     args: ['account', 'add', '--shorthand', shorthand],
     stdin: 'inherit',
     stdout: 'inherit',
@@ -167,7 +177,7 @@ const guideHeadlessSignin = async (): Promise<string> => {
   console.log(
     gray(`Running \`op signin --account ${shorthand}\` — follow the prompts.`),
   );
-  const signin = new Deno.Command('op', {
+  const signin = new Deno.Command(await requireOp(), {
     args: ['signin', '--account', shorthand],
     stdin: 'inherit',
     stdout: 'inherit',
@@ -293,7 +303,9 @@ const normalizeReference = (reference: string): string => {
 const opRead = async (
   reference: string,
 ): Promise<{ success: true; value: string } | { success: false; stderr: string }> => {
-  const result = await shell('op', ['read', reference], { error: false });
+  const result = await shell(await requireOp(), ['read', reference], {
+    error: false,
+  });
   if (result.success) {
     return { success: true, value: result.stdout.trim() };
   }

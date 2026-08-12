@@ -125,9 +125,10 @@ export const openBrowser = async (url: string) => {
   const isSupported = (os: string): os is Supported =>
     supported.includes(os as Supported);
 
+  // Absolute path on darwin: the flake app's PATH has no /usr/bin.
   const openCommands = {
     windows: { cmd: 'cmd', args: ['/c', 'start'] },
-    darwin: { cmd: 'open', args: [] },
+    darwin: { cmd: '/usr/bin/open', args: [] },
     linux: { cmd: 'xdg-open', args: [] },
   };
 

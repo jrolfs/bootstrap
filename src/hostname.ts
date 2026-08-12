@@ -1,6 +1,7 @@
 import { blue, bold, gray } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 import { shell } from './helpers.ts';
+import { bin, hostnamectl } from './system.ts';
 
 const isDarwin = (): boolean => Deno.build.os === 'darwin';
 
@@ -33,19 +34,17 @@ const sanitizeLocalHostName = (name: string): string =>
 const applyHostname = async (name: string): Promise<void> => {
   if (isDarwin()) {
     const local = sanitizeLocalHostName(name);
-    await shell('/usr/bin/sudo', ['scutil', '--set', 'HostName', name]);
-    await shell('/usr/bin/sudo', ['scutil', '--set', 'LocalHostName', local]);
-    await shell('/usr/bin/sudo', ['scutil', '--set', 'ComputerName', name]);
-    await shell('/usr/bin/sudo', ['dscacheutil', '-flushcache'], {
-      error: false,
-    });
-    await shell('/usr/bin/sudo', ['killall', '-HUP', 'mDNSResponder'], {
+    await shell(bin.sudo, [bin.scutil, '--set', 'HostName', name]);
+    await shell(bin.sudo, [bin.scutil, '--set', 'LocalHostName', local]);
+    await shell(bin.sudo, [bin.scutil, '--set', 'ComputerName', name]);
+    await shell(bin.sudo, [bin.dscacheutil, '-flushcache'], { error: false });
+    await shell(bin.sudo, [bin.killall, '-HUP', 'mDNSResponder'], {
       error: false,
     });
     return;
   }
 
-  await shell('/usr/bin/sudo', ['hostnamectl', 'set-hostname', name]);
+  await shell(bin.sudo, [await hostnamectl(), 'set-hostname', name]);
 };
 
 /**
