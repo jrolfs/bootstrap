@@ -69,7 +69,7 @@ export const ensureSystemRebuild = async (): Promise<void> => {
     await shell(
       bin.sudo,
       ['-E', tool, 'switch', '--flake', target, '--show-trace'],
-      { cwd },
+      { cwd, stream: true },
     );
     return;
   }
@@ -90,6 +90,6 @@ export const ensureSystemRebuild = async (): Promise<void> => {
       target,
       '--show-trace',
     ],
-    { cwd },
+    { cwd, stream: true },
   );
 };

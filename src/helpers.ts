@@ -10,6 +10,16 @@ const decoder = new TextDecoder();
 
 export interface ShellOptions extends Deno.CommandOptions {
   error?: boolean;
+  /**
+   * Pass stdout/stderr straight through to this process's terminal instead of
+   * capturing them.
+   *
+   * Required for long, chatty, or interactive commands: a captured pipe fills
+   * at ~64KB and blocks the child, and the child can't tell it's attached to a
+   * TTY (so nix drops its progress bar and `sudo` prompts land in a buffer
+   * rather than on screen). Returned `stdout`/`stderr` are empty when set.
+   */
+  stream?: boolean;
 }
 
 /**
@@ -41,7 +51,7 @@ export const wrapText = (text: string, width: number) => {
 export const shell = async (
   command: string,
   args: string[] = [],
-  { error = true, ...options }: ShellOptions = {},
+  { error = true, stream = false, ...options }: ShellOptions = {},
 ) => {
   const wrap = 80;
   const display = `${command} ${
@@ -57,8 +67,8 @@ export const shell = async (
 
   const process = new Deno.Command(command, {
     args,
-    stdout: 'piped',
-    stderr: 'piped',
+    stdout: stream ? 'inherit' : 'piped',
+    stderr: stream ? 'inherit' : 'piped',
     ...options,
   });
 
@@ -68,14 +78,26 @@ export const shell = async (
     stderr: new Uint8Array(),
   };
 
-  for await (const chunk of subprocess.stdout) {
-    await Deno.stdout.write(chunk);
-    chunks.stdout = new Uint8Array([...chunks.stdout, ...chunk]);
-  }
+  if (!stream) {
+    // Drain both streams concurrently. Draining sequentially deadlocks any
+    // command that writes more than a pipe buffer (~64KB) to the stream we
+    // aren't reading yet — nix, for instance, sends all of its progress and
+    // build output to stderr.
+    const drain = async (
+      source: ReadableStream<Uint8Array>,
+      sink: typeof Deno.stdout,
+      key: 'stdout' | 'stderr',
+    ): Promise<void> => {
+      for await (const chunk of source) {
+        await sink.write(chunk);
+        chunks[key] = new Uint8Array([...chunks[key], ...chunk]);
+      }
+    };
 
-  for await (const chunk of subprocess.stderr) {
-    await Deno.stderr.write(chunk);
-    chunks.stderr = new Uint8Array([...chunks.stderr, ...chunk]);
+    await Promise.all([
+      drain(subprocess.stdout, Deno.stdout, 'stdout'),
+      drain(subprocess.stderr, Deno.stderr, 'stderr'),
+    ]);
   }
 
   const { success } = await subprocess.status;
