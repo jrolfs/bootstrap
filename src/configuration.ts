@@ -6,15 +6,31 @@ export const configuration = configurationSchema.parse({
     user: 'jrolfs',
     email: 'jamie.rolfs@gmail.com',
     clientId: 'Ov23littWGoGtwfc0yEv',
-    repositories: [
-      { url: 'git@github.com:jrolfs/neovim.git', name: 'neovim' },
-      { url: 'git@github.com:jrolfs/private.git', name: 'private' },
-      { url: 'git@github.com:jrolfs/macos.git', name: 'macos' },
-      { url: 'git@github.com:jrolfs/dot.git', name: 'dot' },
-    ],
   },
   homeshick: {
     remote: 'https://github.com/andsens/homeshick.git',
+  },
+  nixConfigRepo: 'git@github.com:jrolfs/nix.git',
+  // Default branch override during the flake migration period.
+  // Flip back to "master" once the migration branch is merged.
+  nixConfigBranch: 'migration-flake',
+  privateCastleRepo: 'git@github.com:jrolfs/private.git',
+  vscodeSyncRepo: 'git@github.com:jrolfs/vscode.git',
+  onePassword: {
+    // Account shorthand is filled in interactively on first signin. If known
+    // ahead of time it can be hardcoded here (e.g. 'my').
+    vault: 'Personal',
+  },
+  resilio: {
+    enabled: true,
+    // Default to 1Password so secrets stop relying on the private castle.
+    // The `private-castle` source is still supported as a fallback for
+    // offline / 1Password-unavailable scenarios.
+    configShareSecretSource: '1password',
+    // Short form `Item/field`; the vault is auto-prefixed from
+    // `onePassword.vault` above. Edit to suit the actual item name.
+    configShareSecretOpReference: 'Resilio Configuration Share/credential',
+    configSharePath: '~/Configuration',
   },
 });
 

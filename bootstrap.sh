@@ -3,8 +3,13 @@
 set -euo pipefail
 
 BOOTSTRAP_DIR="$HOME/.bootstrap"
+OS="$(uname -s)"
 
 function ensure_comand_line_tools() {
+  if [[ "$OS" != "Darwin" ]]; then
+    return 0
+  fi
+
   if xcode-select -p &> /dev/null; then
     echo "✓ Command Line Tools already installed"
     return 0
@@ -18,7 +23,7 @@ function ensure_comand_line_tools() {
   until xcode-select -p &> /dev/null; do
     sleep 5
   done
-  
+
   echo "✓ Command Line Tools installation complete"
 }
 
@@ -26,11 +31,15 @@ function ensure_nix() {
   if [[ -d "/nix" ]]; then
     echo "✓ Nix already installed"
   else
-    echo "Installing Nix..."
-    curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+    echo "Installing Lix..."
+    # Lix is a CppNix fork; multi-user installer follows the same layout.
+    curl --proto '=https' --tlsv1.2 -sSf -L https://install.lix.systems/lix | sh -s -- install
   fi
 
-  # Source the nix profile so `nix` is available in this shell session
+  # Source the nix profile so `nix` is available in this shell session.
+  # TODO(lix): Verify post-install profile path against current Lix docs;
+  # CppNix-compatible layout uses the path below, but Lix may diverge in
+  # future releases.
   if [[ -e "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" ]]; then
     . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
   fi

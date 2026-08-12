@@ -1,9 +1,9 @@
 {
   "schema": "https://raw.githubusercontent.com/denoland/deno/main/cli/schemas/config-file.v1.json",
   "tasks": {
-    "check": "deno check bootstrap.ts",
-    "lint": "deno lint bootstrap.ts",
-    "fmt": "deno fmt bootstrap.ts"
+    "check": "deno check src/*.ts",
+    "lint": "deno lint src",
+    "fmt": "deno fmt src"
   },
   "fmt": {
     "useTabs": false,

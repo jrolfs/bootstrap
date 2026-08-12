@@ -4,6 +4,7 @@
 ### Deno ###
 /.idea/
 /.vscode/
+/.zed/
 
 /node_modules
 
@@ -19,7 +20,7 @@
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
 
 # Thumbnails
 ._*
