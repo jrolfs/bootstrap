@@ -85,6 +85,7 @@ export const environmentSchema = z.object({
 });
 
 export const phaseSchema = z.enum([
+  'hostname-set',
   'nix-installed',
   'github-authed',
   'ssh-key-uploaded',
@@ -100,6 +101,13 @@ export const phaseSchema = z.enum([
 
 export const stateSchema = z.object({
   phases: z.array(phaseSchema).default([]),
+  /**
+   * The hostname chosen during the `hostname-set` phase. Persisted so the
+   * flake selector (`…#<hostname>`) uses the confirmed value on every run
+   * rather than re-reading a possibly-wrong live hostname, and so re-runs
+   * skip the interactive prompt.
+   */
+  hostname: z.string().min(1).optional(),
 });
 
 export type Phase = z.infer<typeof phaseSchema>;

@@ -55,3 +55,14 @@ export const environment = () => {
 
   return parsedEnvironment;
 };
+
+/**
+ * Override the memoized hostname after the `hostname-set` phase has confirmed
+ * (and applied) it. Every consumer reads `environment().hostname`, so this is
+ * the single point that makes the flake selector and SSH key comment use the
+ * confirmed name rather than the live value read at process start.
+ */
+export const setHostname = (hostname: string): void => {
+  const current = environment();
+  parsedEnvironment = { ...current, hostname };
+};

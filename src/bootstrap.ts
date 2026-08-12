@@ -1,12 +1,13 @@
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 
-import { configuration, environment } from './configuration.ts';
+import { configuration, environment, setHostname } from './configuration.ts';
 import { uploadGitHubKey } from './github.ts';
 import { pathExists, shell } from './helpers.ts';
+import { ensureHostname } from './hostname.ts';
 import { ensureSystemRebuild } from './nix.ts';
 import { ensureOpAuthenticated, ensureOpInstalled } from './onepassword.ts';
 import { configureResilio, waitForResilioSync } from './resilio.ts';
-import { loadState, runPhase } from './state.ts';
+import { hasPhase, loadState, recordPhase, runPhase } from './state.ts';
 import type { State } from './schemas.ts';
 
 const NIX_CONFIG_DIR_REL = '.config/system';
@@ -184,6 +185,21 @@ const bootstrap = async (): Promise<void> => {
     environment();
 
     let state: State = await loadState();
+
+    // Confirm/set the hostname first — the flake selects its host config by
+    // hostname, so everything downstream (SSH key comment, the flake selector)
+    // depends on it being correct. The chosen name is persisted to state and
+    // injected into the memoized environment; on a re-run we skip the prompt
+    // but still re-inject so the selector uses the confirmed value.
+    if (hasPhase(state, 'hostname-set')) {
+      if (state.hostname) setHostname(state.hostname);
+      console.log(`✓ hostname ${state.hostname ?? '(unset)'} (cached)`);
+    } else {
+      const hostname = await ensureHostname();
+      setHostname(hostname);
+      state = { ...state, hostname };
+      state = await recordPhase(state, 'hostname-set');
+    }
 
     // Nix is installed by bootstrap.sh; record that fact so future phases can
     // reason about it. Re-running bootstrap.sh is itself idempotent, so we
