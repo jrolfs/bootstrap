@@ -68,42 +68,97 @@ const getDeviceCode = async (clientId: string) => {
   return deviceCodeResponseSchema.parse(await response.json());
 };
 
-const pollForToken = async (
-  clientId: string,
-  deviceCode: string,
-  interval: number,
-): Promise<string> => {
-  console.log('Polling for token...');
+// GitHub's device-flow payload is snake_case; quoted keys keep the wire format
+// intact without tripping the camelcase lint rule (same as resilio.ts).
+interface PendingDeviceCode {
+  readonly 'device_code': string;
+  readonly 'user_code': string;
+  readonly 'verification_uri': string;
+  readonly interval: number;
+  /** Epoch millis after which the code is no longer usable. */
+  readonly 'expires_at': number;
+}
 
-  const response = await fetch(
-    'https://github.com/login/oauth/access_token',
-    {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        client_id: clientId,
-        device_code: deviceCode,
-        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-      }),
-    },
+/**
+ * Prints the verification URL and user code. Called every time we start or
+ * resume polling — including when resuming from a cached code, where the user
+ * otherwise has no way to know what to type.
+ */
+const printDeviceCodeInstructions = (pending: PendingDeviceCode): void => {
+  const minutes = Math.max(
+    0,
+    Math.round((pending.expires_at - Date.now()) / 60_000),
   );
 
-  if (!response.ok) {
-    await reportApiError(response);
-    throw new Error('Failed to get access token');
-  }
+  console.log('\nTo authenticate with GitHub:');
+  console.log(`  1. Visit: ${pending.verification_uri}`);
+  console.log(`  2. Enter code: ${pending.user_code}`);
+  console.log(`  (code expires in ~${minutes}m)\n`);
+};
 
-  const data = await response.json();
-  const result = accessTokenResponseSchema.parse(data);
+const sleep = (seconds: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 
-  if ('error' in result) {
+/**
+ * Polls GitHub for the access token until the user completes authorization.
+ *
+ * Iterative (not recursive) and bounded by the code's expiry. Re-prints the
+ * instructions periodically so the code stays visible amid the polling output,
+ * and honours `slow_down` by backing the interval off as the spec requires.
+ *
+ * @returns The access token
+ * @throws When the code expires, is denied, or the request fails
+ */
+const pollForToken = async (
+  clientId: string,
+  pending: PendingDeviceCode,
+): Promise<string> => {
+  let interval = pending.interval;
+  let polls = 0;
+
+  while (Date.now() < pending.expires_at) {
+    const response = await fetch(
+      'https://github.com/login/oauth/access_token',
+      {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          client_id: clientId,
+          device_code: pending.device_code,
+          grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      await reportApiError(response);
+      throw new Error('Failed to get access token');
+    }
+
+    const result = accessTokenResponseSchema.parse(await response.json());
+
+    if (!('error' in result)) return result.access_token;
+
     if (result.error === 'authorization_pending') {
-      await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+      polls += 1;
+      // Re-surface the code every ~10 polls (~50s at the default interval) so
+      // it's never scrolled off screen while waiting.
+      if (polls % 10 === 0) printDeviceCodeInstructions(pending);
+      else console.log('Polling for token...');
 
-      return pollForToken(clientId, deviceCode, interval);
+      await sleep(interval);
+      continue;
+    }
+
+    if (result.error === 'slow_down') {
+      // Per the device-flow spec, back off by 5s and keep polling.
+      interval += 5;
+      console.log(`Rate limited; slowing polling to ${interval}s`);
+      await sleep(interval);
+      continue;
     }
 
     console.error(JSON.stringify(result, null, 2));
@@ -113,7 +168,10 @@ const pollForToken = async (
     );
   }
 
-  return result.access_token;
+  throw new Error(
+    'Device code expired before authorization completed. Re-run bootstrap to ' +
+      'get a fresh code.',
+  );
 };
 
 const authenticateGitHub = async (clientId: string) => {
@@ -122,37 +180,41 @@ const authenticateGitHub = async (clientId: string) => {
     return githubAccessToken;
   }
 
+  // Resume a still-valid saved code (a killed/re-run bootstrap keeps the same
+  // pending authorization) — but re-print the instructions, since the user
+  // needs the code in front of them either way.
   if (await exists(DEVICE_CODE_FILE)) {
-    const savedCode = JSON.parse(await Deno.readTextFile(DEVICE_CODE_FILE));
+    const saved = JSON.parse(
+      await Deno.readTextFile(DEVICE_CODE_FILE),
+    ) as PendingDeviceCode;
 
-    if (savedCode.expires_at > Date.now()) {
-      console.log('Using saved device code');
-      return pollForToken(clientId, savedCode.device_code, savedCode.interval);
+    if (saved.expires_at > Date.now()) {
+      console.log('Resuming saved device code');
+      printDeviceCodeInstructions(saved);
+      await openBrowser(saved.verification_uri);
+
+      githubAccessToken = await pollForToken(clientId, saved);
+      return githubAccessToken;
     }
+
+    console.log('Saved device code expired; requesting a fresh one');
+    await Deno.remove(DEVICE_CODE_FILE).catch(() => {});
   }
 
   const deviceCode = await getDeviceCode(clientId);
+  const pending: PendingDeviceCode = {
+    ...deviceCode,
+    'expires_at': Date.now() + deviceCode.expires_in * 1000,
+  };
 
   await ensureFile(DEVICE_CODE_FILE);
-  await Deno.writeTextFile(
-    DEVICE_CODE_FILE,
-    JSON.stringify({
-      ...deviceCode,
-      expires_at: Date.now() + deviceCode.expires_in * 1000,
-    }),
-  );
+  await Deno.writeTextFile(DEVICE_CODE_FILE, JSON.stringify(pending));
 
-  console.log('\nTo authenticate with GitHub:');
-  console.log(`1. Visit: ${deviceCode.verification_uri}`);
-  console.log(`2. Enter code: ${deviceCode.user_code}\n`);
+  printDeviceCodeInstructions(pending);
 
-  await openBrowser(deviceCode.verification_uri);
+  await openBrowser(pending.verification_uri);
 
-  githubAccessToken = await pollForToken(
-    clientId,
-    deviceCode.device_code,
-    deviceCode.interval,
-  );
+  githubAccessToken = await pollForToken(clientId, pending);
 
   return githubAccessToken;
 };
