@@ -31,20 +31,6 @@ const findGuiApp = async (): Promise<string | null> => {
 const requireOp = (): Promise<string> => requireBrewBinary('op');
 
 /**
- * Session token captured from a headless `op signin --raw`.
- *
- * Passed explicitly as `--session` to subsequent `op` calls rather than
- * exported as `OP_SESSION_<name>`, because the env-var name depends on the
- * account (shorthand vs UUID across `op` versions) while `--session` is
- * unambiguous. Unused on the GUI-integration path, where `op` gets sessions
- * from the desktop app and no token is involved.
- */
-let sessionToken: string | null = null;
-
-const withSession = (args: readonly string[]): string[] =>
-  sessionToken ? [...args, '--session', sessionToken] : [...args];
-
-/**
  * Reusable interface to the 1Password CLI (`op`).
  *
  * This module is intentionally generic: bootstrap modules that need secrets
@@ -110,23 +96,8 @@ export const ensureOpInstalled = async (): Promise<void> => {
 const isOpAuthenticated = async (): Promise<boolean> => {
   const op = await findBrewBinary('op');
   if (!op) return false;
-  const result = await shell(op, withSession(['whoami']), { error: false });
+  const result = await shell(op, ['whoami'], { error: false });
   return result.success;
-};
-
-/**
- * True when `op` already has the given account configured (i.e. a previous
- * `op account add` succeeded, possibly in an earlier bootstrap run).
- */
-const opAccountExists = async (shorthand: string): Promise<boolean> => {
-  const op = await findBrewBinary('op');
-  if (!op) return false;
-
-  const result = await shell(op, ['account', 'list'], { error: false });
-  if (!result.success) return false;
-
-  return result.stdout.includes(shorthand) ||
-    result.stdout.trim().split('\n').length > 1;
 };
 
 /**
@@ -179,95 +150,22 @@ const guideGuiIntegration = async (): Promise<void> => {
 };
 
 /**
- * Runs the headless `op account add` + `op signin` flow. Used when the GUI
- * is unavailable or the user prefers terminal-only signin.
- */
-const guideHeadlessSignin = async (): Promise<string> => {
-  console.log(blue(bold('\n1Password headless signin')));
-
-  const configuredShorthand =
-    configuration.onePassword?.accountShorthand?.trim();
-
-  const shorthand =
-    configuredShorthand && configuredShorthand.length > 0
-      ? configuredShorthand
-      : await promptLine('Account shorthand (e.g. "my"): ');
-
-  if (!shorthand) {
-    throw new Error('1Password account shorthand is required');
-  }
-
-  // `op account add` is interactive on its own (prompts for sign-in address,
-  // email, secret key, password). We hand stdin/stdout straight through.
-  // Skipped when the account is already configured, which is the case on any
-  // re-run after a previously successful add.
-  if (await opAccountExists(shorthand)) {
-    console.log(gray(`✓ 1Password account already added; skipping account add`));
-  } else {
-    console.log(
-      gray(
-        `Running \`op account add --shorthand ${shorthand}\` — follow the prompts.`,
-      ),
-    );
-
-    const add = new Deno.Command(await requireOp(), {
-      args: ['account', 'add', '--shorthand', shorthand],
-      stdin: 'inherit',
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
-    const { success: addSuccess } = await add.output();
-    if (!addSuccess) {
-      throw new Error(
-        '`op account add` failed; cannot continue 1Password setup',
-      );
-    }
-  }
-
-  // `--raw` prints just the session token. Plain `op signin` prints
-  // `export OP_SESSION_…=…` and refuses to run unless it believes the output
-  // will be eval'd by a shell ("Output of 'op signin' is meant to be executed
-  // by your terminal"), which is useless from a subprocess. Capture the token
-  // instead and pass it as `--session` on later calls (see `withSession`).
-  // stdin/stderr stay attached so the password prompt works.
-  console.log(
-    gray(`Running \`op signin --account ${shorthand} --raw\` — follow the prompts.`),
-  );
-  const signin = new Deno.Command(await requireOp(), {
-    args: ['signin', '--account', shorthand, '--raw'],
-    stdin: 'inherit',
-    stdout: 'piped',
-    stderr: 'inherit',
-  });
-  const { success: signinSuccess, stdout } = await signin.output();
-  if (!signinSuccess) {
-    throw new Error('`op signin` failed; cannot continue 1Password setup');
-  }
-
-  const token = new TextDecoder().decode(stdout).trim();
-  if (!token) {
-    throw new Error('`op signin --raw` returned an empty session token');
-  }
-
-  sessionToken = token;
-  console.log('✓ 1Password session captured for this bootstrap run');
-
-  return shorthand;
-};
-
-/**
- * Ensures `op whoami` succeeds. Prefers the 1Password GUI's CLI integration
- * (no password typing) and falls back to `op account add` + `op signin` when
- * the GUI isn't available.
+ * Ensures `op whoami` succeeds via the 1Password desktop app's CLI
+ * integration. No passwords or session tokens are involved. Whenever the app
+ * is installed `op` defers to it, so this is the path that actually works —
+ * and it's not macOS-specific: the Linux desktop app offers the same
+ * integration, so this generalizes to any host with a desktop session.
  *
- * Loops until authentication succeeds — the user can retry the interactive
- * steps from a stale state without re-running bootstrap.
+ * Loops the guided flow so the user can retry without re-running bootstrap.
  *
- * Open question / TODO(onepassword): there's no reliable way to detect that
- * the GUI's "Integrate with 1Password CLI" toggle is enabled short of
- * actually trying `op whoami`. We rely on the user confirming the prompt
- * and then probe. If the probe fails we re-prompt or fall back to the
- * headless path.
+ * There's no way to detect that the "Integrate with 1Password CLI" toggle is
+ * enabled short of trying `op whoami`, so we guide, then probe.
+ *
+ * A *truly* headless host (no desktop session at all) should use a 1Password
+ * service account via `OP_SERVICE_ACCOUNT_TOKEN` rather than interactive
+ * signin. An earlier `op account add` + `op signin` fallback lived here, but
+ * it's unreachable wherever the app is installed and is the wrong mechanism
+ * for automation, so it was removed.
  */
 export const ensureOpAuthenticated = async (): Promise<void> => {
   if (Deno.build.os !== 'darwin') {
@@ -281,44 +179,32 @@ export const ensureOpAuthenticated = async (): Promise<void> => {
     return;
   }
 
-  const guiInstalled = (await findGuiApp()) !== null;
+  if (!(await findGuiApp())) {
+    throw new Error(
+      'The 1Password desktop app is not installed, so CLI integration is ' +
+        'unavailable. Install it (the op-installed phase does this) and re-run.',
+    );
+  }
 
-  // Loop until `op whoami` succeeds. Each iteration the user can pick the
-  // GUI path (fast, no password) or fall through to headless.
-  // Hard cap of attempts prevents infinite loops in CI-ish environments.
+  // Retry the guided flow a few times — the user may need a couple of passes
+  // to find the toggle. Capped so a non-interactive run can't spin forever.
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (guiInstalled) {
-      await guideGuiIntegration();
-      if (await isOpAuthenticated()) {
-        console.log('✓ 1Password CLI authenticated via GUI integration');
-        return;
-      }
-
-      const fallback = await promptLine(
-        'GUI integration did not yield a session. Try headless signin? [y/N]: ',
-      );
-      if (!fallback.toLowerCase().startsWith('y')) {
-        console.log('Retrying GUI integration flow...');
-        continue;
-      }
-    }
-
-    await guideHeadlessSignin();
+    await guideGuiIntegration();
 
     if (await isOpAuthenticated()) {
-      console.log('✓ 1Password CLI authenticated via headless signin');
+      console.log('✓ 1Password CLI authenticated via GUI integration');
       return;
     }
 
     console.log(
-      yellow(
-        '`op whoami` still failing after signin attempt; retrying setup flow.',
-      ),
+      yellow('`op whoami` still failing — check the toggle and try again.'),
     );
   }
 
   throw new Error(
-    '1Password CLI authentication did not complete after multiple attempts',
+    '1Password CLI authentication did not complete. Enable Settings -> ' +
+      'Developer -> "Integrate with 1Password CLI" in the desktop app, ' +
+      'confirm `op whoami` succeeds, then re-run bootstrap.',
   );
 };
 
@@ -367,7 +253,7 @@ const normalizeReference = (reference: string): string => {
 const opRead = async (
   reference: string,
 ): Promise<{ success: true; value: string } | { success: false; stderr: string }> => {
-  const result = await shell(await requireOp(), withSession(['read', reference]), {
+  const result = await shell(await requireOp(), ['read', reference], {
     error: false,
   });
   if (result.success) {

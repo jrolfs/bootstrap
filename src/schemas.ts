@@ -49,12 +49,6 @@ export const resilioConfigurationSchema = z.object({
 
 export const onePasswordConfigurationSchema = z.object({
   /**
-   * 1Password account shorthand (the `--account` flag value). When unset the
-   * signin flow will prompt the user. Persisted in `op account list` after a
-   * successful first-time signin.
-   */
-  accountShorthand: z.string().min(1).optional(),
-  /**
    * Default vault used to expand short-form secret references (e.g.
    * `Item/field` -> `op://<vault>/Item/field`). Modules that fetch secrets
    * pass references through `readSecret`, which performs the expansion.
