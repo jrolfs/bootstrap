@@ -33,18 +33,12 @@ const githubSshUrl = z
 
 export const resilioConfigurationSchema = z.object({
   enabled: z.boolean().default(false),
-  configShareSecretSource: z
-    .enum(['private-castle', 'prompt', '1password'])
-    .default('1password'),
-  configSharePath: z.string().default('~/Configuration'),
   /**
-   * 1Password secret reference for the configuration-share secret. May be a
-   * fully qualified reference (`op://Vault/Item/field`) or a shorter form
-   * (`Item/field` / `Vault/Item/field`) that will be normalized against
-   * `onePassword.vault` when set. Required when
-   * `configShareSecretSource === '1password'`.
+   * Path of the synced configuration share. Used to wait for the initial sync
+   * and to locate the mackup store. No share secret is configured: devices are
+   * linked to a Resilio identity, which brings its shares along.
    */
-  configShareSecretOpReference: z.string().min(1).optional(),
+  configSharePath: z.string().default('~/Configuration'),
 });
 
 export const onePasswordConfigurationSchema = z.object({
