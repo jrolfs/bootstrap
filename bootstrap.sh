@@ -43,29 +43,41 @@ function source_nix_profile() {
   fi
 }
 
+function nix_installed() {
+  # A *real* install — not a leftover empty /nix mountpoint, which lingers on
+  # macOS after a Determinate/Lix uninstall until the next reboot (the APFS
+  # store volume's synthetic firmlink). Keying off `[[ -d /nix ]]` alone would
+  # false-positive on that empty directory, so check for actual install state.
+  command -v nix >/dev/null 2>&1 && return 0
+  [[ -e "$NIX_PROFILE_SCRIPT" ]] && return 0
+  [[ -e "/nix/receipt.json" ]] && return 0
+  [[ -n "$(ls -A /nix/store 2>/dev/null)" ]] && return 0
+  return 1
+}
+
 function ensure_nix() {
   # Source first so the Lix-vs-other detection below can run `nix`.
   source_nix_profile
 
-  if [[ -d "/nix" ]]; then
+  if nix_installed; then
     # This bootstrap installs Lix and lets nix-darwin manage the daemon
     # (nix.enable = true; nix.package = lix). A Determinate/upstream install
-    # (both also live at /nix and write /nix/receipt.json, so the presence of
-    # /nix alone can't tell them apart — the version string can) will fight
-    # nix-darwin at the first switch. Refuse to build on top of it.
+    # (both also live at /nix and write /nix/receipt.json, so presence alone
+    # can't tell them apart — the version string can) will fight nix-darwin at
+    # the first switch. Refuse to build on top of it.
     if nix --version 2>/dev/null | grep -qi 'lix'; then
       echo "✓ Lix already installed"
       return 0
     fi
 
     echo "" >&2
-    echo "✗ An existing non-Lix Nix was detected at /nix." >&2
+    echo "✗ An existing non-Lix Nix was detected." >&2
     echo "  (\`nix --version\`: $(nix --version 2>/dev/null || echo 'unavailable'))" >&2
     echo "  This installer expects Lix + nix-darwin-managed nix; a Determinate/" >&2
-    echo "  upstream install conflicts at the first switch. Uninstall it and" >&2
-    echo "  re-run this script:" >&2
+    echo "  upstream install conflicts at the first switch. Uninstall it, then" >&2
+    echo "  REBOOT (macOS leaves an empty /nix mount until you do), then re-run:" >&2
     echo "" >&2
-    echo "      sudo /nix/nix-installer uninstall" >&2
+    echo "      sudo /nix/nix-installer uninstall && sudo reboot" >&2
     echo "" >&2
     exit 1
   fi
