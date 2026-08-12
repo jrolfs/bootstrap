@@ -39,7 +39,12 @@ function source_nix_profile() {
   # TODO(lix): Verify this path against current Lix docs; the CppNix-compatible
   # layout uses it today but Lix may diverge in future releases.
   if [[ -e "$NIX_PROFILE_SCRIPT" ]]; then
+    # nix-daemon.sh references $ZSH_VERSION / $BASH_VERSION without defaults,
+    # which trips `set -eu`; relax errexit+nounset just around the source.
+    set +eu
+    # shellcheck disable=SC1090
     . "$NIX_PROFILE_SCRIPT"
+    set -eu
   fi
 }
 
