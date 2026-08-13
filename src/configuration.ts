@@ -27,8 +27,8 @@ export const configuration = configurationSchema.parse({
     // reason — 1Password service accounts grant access per vault, so a headless
     // host (Irulan) can later be scoped to just this one.
     //
-    // Create it with: op vault create Infrastructure
-    secretsVault: 'Infrastructure',
+    // Create it with: op vault create Secrets
+    secretsVault: 'Secrets',
   },
   gpg: {
     // op:// references live in secrets.json, recorded by `secrets gpg export` —
