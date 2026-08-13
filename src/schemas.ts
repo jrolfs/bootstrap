@@ -63,20 +63,6 @@ export const gpgConfigurationSchema = z.object({
    * already lists it, the import is skipped.
    */
   fingerprint: z.string().min(1),
-  /**
-   * 1Password *document* holding the armored secret-key export
-   * (`gpg --export-secret-keys --armor`). Piped straight into `gpg --import`,
-   * never written to disk. Keep a passphrase on the key so the export is also
-   * encrypted at rest inside 1Password.
-   *
-   * Accepts `op://Vault/Item` or a name resolved against `onePassword.vault`.
-   */
-  secretKeyOpReference: z.string().min(1).optional(),
-  /**
-   * 1Password document holding `gpg --export-ownertrust` output. Optional —
-   * without it the imported key has no assigned trust.
-   */
-  ownertrustOpReference: z.string().min(1).optional(),
 });
 
 export const onePasswordConfigurationSchema = z.object({
@@ -86,6 +72,16 @@ export const onePasswordConfigurationSchema = z.object({
    * pass references through `readSecret`, which performs the expansion.
    */
   vault: z.string().min(1).optional(),
+  /**
+   * Vault the `secrets` CLI *creates* items in. Kept separate from `vault` so
+   * machine secrets can live in a dedicated vault without breaking short-form
+   * references that point at the personal one.
+   *
+   * A dedicated vault matters beyond tidiness: 1Password service accounts grant
+   * access per vault, so a headless host can be given a token scoped to only
+   * these secrets rather than an entire personal vault.
+   */
+  secretsVault: z.string().min(1).optional(),
 });
 
 export const configurationSchema = z.object({

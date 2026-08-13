@@ -20,21 +20,21 @@ export const configuration = configurationSchema.parse({
   privateCastleRepo: 'git@github.com:jrolfs/private.git',
   vscodeSyncRepo: 'git@github.com:jrolfs/vscode.git',
   onePassword: {
+    // Default vault for expanding short-form references.
     vault: 'Private',
+    // Where the `secrets` CLI creates items. A dedicated vault keeps machine
+    // secrets separate from the ~1300-item personal vault, and — the real
+    // reason — 1Password service accounts grant access per vault, so a headless
+    // host (Irulan) can later be scoped to just this one.
+    //
+    // Create it with: op vault create Infrastructure
+    secretsVault: 'Infrastructure',
   },
   gpg: {
+    // The op:// references live in secrets.json, recorded by
+    // `secrets gpg export` — run that from a machine that already holds the
+    // key. Until then the gpg-imported phase is inert.
     fingerprint: '91C155A78968EEE863ED8B22626AE770762AC2F3',
-    // Create the 1Password documents first, then set these. Until they're set
-    // the phase is inert (it logs how to create them and moves on):
-    //
-    //   gpg --export-secret-keys --armor <fingerprint> > /tmp/gpg-secret.asc
-    //   gpg --export-ownertrust > /tmp/gpg-ownertrust.txt
-    //   op document create /tmp/gpg-secret.asc --title 'GPG Secret Key' --vault Private
-    //   op document create /tmp/gpg-ownertrust.txt --title 'GPG Ownertrust' --vault Private
-    //   rm -P /tmp/gpg-secret.asc /tmp/gpg-ownertrust.txt
-    //
-    // secretKeyOpReference: 'GPG Secret Key',
-    // ownertrustOpReference: 'GPG Ownertrust',
   },
   resilio: {
     enabled: true,

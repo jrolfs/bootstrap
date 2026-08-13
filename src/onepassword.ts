@@ -344,3 +344,79 @@ export const readDocument = async (
       second.stderr,
   );
 };
+
+interface CreateDocumentOptions {
+  readonly title: string;
+  readonly fileName: string;
+  readonly contents: string;
+  /** Overrides `onePassword.secretsVault`. */
+  readonly vault?: string;
+}
+
+/**
+ * Creates (or replaces) a 1Password document from in-memory contents and
+ * returns its `op://Vault/Title` reference.
+ *
+ * `op document create` reads from stdin with `-`, so the payload never touches
+ * disk and never appears in argv. When a document with this title already
+ * exists it is edited in place, keeping the reference — and therefore the
+ * manifest entry — stable across re-exports.
+ *
+ * @returns The `op://` reference to store in the manifest
+ */
+export const createDocument = async (
+  options: CreateDocumentOptions,
+): Promise<string> => {
+  const { title, fileName, contents } = options;
+  const vault = options.vault ?? configuration.onePassword?.secretsVault ??
+    configuration.onePassword?.vault;
+
+  if (!vault) {
+    throw new Error(
+      'No vault configured for document creation: set ' +
+        '`onePassword.secretsVault`.',
+    );
+  }
+
+  const op = await requireOp();
+
+  const exists = await shell(op, ['item', 'get', title, '--vault', vault], {
+    error: false,
+  });
+
+  const args = exists.success
+    ? ['document', 'edit', title, '-', '--vault', vault, '--file-name', fileName]
+    : [
+      'document',
+      'create',
+      '-',
+      '--title',
+      title,
+      '--vault',
+      vault,
+      '--file-name',
+      fileName,
+    ];
+
+  const child = new Deno.Command(op, {
+    args,
+    stdin: 'piped',
+    stdout: 'piped',
+    stderr: 'piped',
+  }).spawn();
+
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(contents));
+  await writer.close();
+
+  const { success, stderr } = await child.output();
+
+  if (!success) {
+    throw new Error(
+      `\`op document ${exists.success ? 'edit' : 'create'}\` failed for ` +
+        `${title}:\n${new TextDecoder().decode(stderr)}`,
+    );
+  }
+
+  return `op://${vault}/${title}`;
+};
