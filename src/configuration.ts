@@ -31,10 +31,27 @@ export const configuration = configurationSchema.parse({
     secretsVault: 'Infrastructure',
   },
   gpg: {
-    // The op:// references live in secrets.json, recorded by
-    // `secrets gpg export` — run that from a machine that already holds the
-    // key. Until then the gpg-imported phase is inert.
-    fingerprint: '91C155A78968EEE863ED8B22626AE770762AC2F3',
+    // op:// references live in secrets.json, recorded by `secrets gpg export` —
+    // run that from a machine that already holds the material. Until then the
+    // gpg-imported phase is inert.
+    keyrings: [
+      {
+        name: 'default',
+        fingerprint: '91C155A78968EEE863ED8B22626AE770762AC2F3',
+        hosts: ['*'],
+      },
+      {
+        // Separate GNUPGHOME rather than `--keyring=fondo.kbx`: GnuPG doesn't
+        // partition *secret* keys by keyring (they all live in one flat
+        // private-keys-v1.d per home), so a separate home is the only way to
+        // keep this identity's secret key off a machine entirely.
+        //
+        // Access it with: GNUPGHOME=~/.gnupg-fondo gpg …
+        name: 'fondo',
+        home: '.gnupg-fondo',
+        hosts: ['newt', 'ala'],
+      },
+    ],
   },
   resilio: {
     enabled: true,

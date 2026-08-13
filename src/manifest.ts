@@ -32,6 +32,11 @@ export const secretEntrySchema = z.object({
   /** Mode for a materialized target. Credentials should stay `0600`. */
   mode: z.string().default('0600'),
   /**
+   * `GNUPGHOME` (relative to `$HOME`) this entry belongs to, for GPG keyring
+   * entries. Lets `secrets gpg import` route each export to the right keyring.
+   */
+  gnupgHome: z.string().optional(),
+  /**
    * Hosts this secret belongs on. `["*"]` means every machine. Anything else
    * gates it to the listed short hostnames — which is how a secondary keyring
    * lands on one machine and not the rest.

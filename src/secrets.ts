@@ -27,8 +27,8 @@ const USAGE = `${bold('secrets')} — 1Password-backed secret manifest
   secrets materialize [<name>…]       write entries with a target to disk (0600)
   secrets add <name> --reference <op://…> [options]
                                       record an existing item's reference
-  secrets gpg export                  capture this machine's GPG key -> 1Password
-  secrets gpg import                  import the GPG key from 1Password
+  secrets gpg export [<keyring>]      capture a keyring -> 1Password (default: first)
+  secrets gpg import                  import every keyring for this host
 
   add options: --target <path-relative-to-$HOME> --mode <0600>
                --hosts <a,b|*> --kind <document|field> --description <text>
@@ -210,7 +210,9 @@ const main = async (): Promise<void> => {
         await add(subcommand, flags);
         return;
       case 'gpg':
-        if (subcommand === 'export') return await exportGpgKeys();
+        if (subcommand === 'export') {
+          return await exportGpgKeys(positional[2]);
+        }
         if (subcommand === 'import') return await importGpgKeys();
         throw new Error(`Unknown gpg subcommand: ${subcommand ?? '(none)'}`);
       case undefined:

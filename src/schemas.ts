@@ -57,12 +57,35 @@ export const resilioConfigurationSchema = z.object({
   linkingCodeOpReference: z.string().min(1).optional(),
 });
 
-export const gpgConfigurationSchema = z.object({
+export const gpgKeyringSchema = z.object({
   /**
-   * Primary key fingerprint, used as the idempotency check: when `gpg -K`
-   * already lists it, the import is skipped.
+   * Manifest key prefix and CLI identifier — entries are recorded as
+   * `<name>-secret-keys` and `<name>-ownertrust`.
    */
-  fingerprint: z.string().min(1),
+  name: z.string().min(1),
+  /**
+   * `GNUPGHOME` for this keyring, relative to `$HOME`. Omit for the default
+   * `~/.gnupg`.
+   *
+   * GnuPG does not partition *secret* keys by keyring — `--keyring` only selects
+   * a public keybox, while secret keys all live in one flat
+   * `private-keys-v1.d` per GNUPGHOME. A separate home is therefore the only way
+   * to keep an identity's secret key off a machine entirely.
+   */
+  home: z.string().optional(),
+  /**
+   * Fingerprint to export, and the idempotency check on import. Omit to export
+   * *every* secret key in this GNUPGHOME — which is what a separate identity
+   * keyring usually wants.
+   */
+  fingerprint: z.string().min(1).optional(),
+  /** Machines this keyring belongs on. `["*"]` for all. */
+  hosts: z.array(z.string()).default(['*']),
+});
+
+export const gpgConfigurationSchema = z.object({
+  /** Keyrings to export/import. The first is treated as the default. */
+  keyrings: z.array(gpgKeyringSchema).default([]),
 });
 
 export const onePasswordConfigurationSchema = z.object({
@@ -140,6 +163,7 @@ export type State = z.infer<typeof stateSchema>;
 export type Configuration = z.infer<typeof configurationSchema>;
 export type ResilioConfiguration = z.infer<typeof resilioConfigurationSchema>;
 export type GpgConfiguration = z.infer<typeof gpgConfigurationSchema>;
+export type GpgKeyring = z.infer<typeof gpgKeyringSchema>;
 export type OnePasswordConfiguration = z.infer<
   typeof onePasswordConfigurationSchema
 >;
