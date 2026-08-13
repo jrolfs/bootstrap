@@ -12,7 +12,17 @@ import { createDocument, readDocument } from './onepassword.ts';
 import { findBrewBinary } from './system.ts';
 import type { GpgKeyring } from './schemas.ts';
 
-/** Manifest key names per keyring. */
+/**
+ * Manifest key names per keyring.
+ *
+ * Three artifacts are needed to reconstitute a GNUPGHOME, and they're distinct:
+ * `--export` carries *all* public keys (yours and other people's),
+ * `--export-secret-keys` carries only your secret keys (each embedding its own
+ * public half), and `--export-ownertrust` carries trust *assignments* —
+ * fingerprint → trust level — not key material. Exporting only the latter two
+ * silently drops every third-party public key in the keyring.
+ */
+const publicKeyName = (keyring: string): string => `${keyring}-public-keys`;
 const secretKeyName = (keyring: string): string => `${keyring}-secret-keys`;
 const ownertrustName = (keyring: string): string => `${keyring}-ownertrust`;
 
@@ -121,11 +131,11 @@ const findKeyring = (name: string): GpgKeyring | undefined =>
   (configuration.gpg?.keyrings ?? []).find((keyring) => keyring.name === name);
 
 /**
- * Imports one keyring's secret keys and ownertrust from 1Password.
+ * Reconstitutes one keyring from 1Password: public keys, secret keys, ownertrust.
  *
- * Skipped when the keyring already holds the key, so re-runs are cheap. A
- * secret-key export embeds the public half, so this reconstructs the public
- * keybox as well — no separate `.kbx` handling required.
+ * Public keys are imported on every run (idempotent, and the only thing carrying
+ * third-party keys); the secret import is skipped when already present;
+ * ownertrust goes last since it references keys by fingerprint.
  */
 const importKeyring = async (
   gpg: string,
@@ -151,12 +161,7 @@ const importKeyring = async (
     return;
   }
 
-  if (await hasSecretKey(gpg, keyring)) {
-    console.log(`✓ ${keyring.name} secret key(s) already present`);
-    return;
-  }
-
-  console.log(blue(bold(`\nImporting ${keyring.name} secret key(s)`)));
+  console.log(blue(bold(`\nImporting ${keyring.name} keyring`)));
 
   const home = homeFor(keyring);
 
@@ -170,30 +175,63 @@ const importKeyring = async (
     ? { ...Deno.env.toObject(), GNUPGHOME: home }
     : undefined;
 
-  const armored = await readDocument(entry.reference);
+  // Public keys first: importing them is idempotent and cheap, and it's what
+  // carries other people's keys. Done on every run (not gated on the secret-key
+  // presence check) so a keyring that gained correspondents upstream actually
+  // converges rather than being skipped forever.
+  const publicEntry = manifest.secrets[publicKeyName(keyring.name)];
 
-  if (!armored.includes('BEGIN PGP PRIVATE KEY BLOCK')) {
-    throw new Error(
-      `1Password document ${entry.reference} does not look like an armored ` +
-        'secret key export (no "BEGIN PGP PRIVATE KEY BLOCK").',
+  if (publicEntry) {
+    const publicKeys = await readDocument(publicEntry.reference);
+    const importedPublic = await pipeInto(
+      gpg,
+      ['--batch', '--import'],
+      publicKeys,
+      gpgEnvironment,
     );
+
+    console.log(
+      importedPublic.success
+        ? `✓ ${keyring.name} public keys imported`
+        : yellow(
+          `public key import failed for ${keyring.name}:\n` +
+            importedPublic.stderr,
+        ),
+    );
+  } else {
+    console.log(gray(`No public keys recorded for ${keyring.name}`));
   }
 
-  const imported = await pipeInto(
-    gpg,
-    ['--batch', '--import'],
-    armored,
-    gpgEnvironment,
-  );
+  if (await hasSecretKey(gpg, keyring)) {
+    console.log(`✓ ${keyring.name} secret key(s) already present`);
+  } else {
+    const armored = await readDocument(entry.reference);
 
-  if (!imported.success) {
-    throw new Error(
-      `\`gpg --import\` failed for ${keyring.name}:\n${imported.stderr}`,
+    if (!armored.includes('BEGIN PGP PRIVATE KEY BLOCK')) {
+      throw new Error(
+        `1Password document ${entry.reference} does not look like an armored ` +
+          'secret key export (no "BEGIN PGP PRIVATE KEY BLOCK").',
+      );
+    }
+
+    const imported = await pipeInto(
+      gpg,
+      ['--batch', '--import'],
+      armored,
+      gpgEnvironment,
     );
+
+    if (!imported.success) {
+      throw new Error(
+        `\`gpg --import\` failed for ${keyring.name}:\n${imported.stderr}`,
+      );
+    }
+
+    console.log(`✓ ${keyring.name} secret key(s) imported`);
   }
 
-  console.log(`✓ ${keyring.name} secret key(s) imported`);
-
+  // Ownertrust last: it references keys by fingerprint, so the keys should
+  // already be present.
   const trustEntry = manifest.secrets[ownertrustName(keyring.name)];
 
   if (!trustEntry) {
@@ -306,6 +344,21 @@ export const exportGpgKeys = async (name?: string): Promise<void> => {
     contents: exported.stdout,
   });
 
+  // Always export *all* public keys, with no fingerprint filter: this is the
+  // only artifact that carries other people's keys, and a keyring is not
+  // reproducible without them. Not sensitive, but kept in the same store so
+  // there's one mechanism.
+  const publicKeys = await runGpg(gpg, keyring, ['--batch', '--armor', '--export']);
+
+  const publicReference =
+    publicKeys.success && publicKeys.stdout.includes('PUBLIC KEY BLOCK')
+      ? await createDocument({
+        title: `GPG ${keyring.name} public keys`,
+        fileName: `${keyring.name}-public-keys.asc`,
+        contents: publicKeys.stdout,
+      })
+      : null;
+
   const ownertrust = await runGpg(gpg, keyring, ['--export-ownertrust']);
 
   const trustReference = ownertrust.success && ownertrust.stdout.trim()
@@ -334,6 +387,17 @@ export const exportGpgKeys = async (name?: string): Promise<void> => {
         reference: keyReference,
         description: `Armored secret keys for the ${keyring.name} keyring`,
       },
+      ...(publicReference
+        ? {
+          [publicKeyName(keyring.name)]: {
+            ...shared,
+            reference: publicReference,
+            description:
+              `All public keys in the ${keyring.name} keyring, including ` +
+              'third parties',
+          },
+        }
+        : {}),
       ...(trustReference
         ? {
           [ownertrustName(keyring.name)]: {
@@ -347,5 +411,6 @@ export const exportGpgKeys = async (name?: string): Promise<void> => {
   });
 
   console.log(`✓ recorded ${keyReference}`);
+  if (publicReference) console.log(`✓ recorded ${publicReference}`);
   if (trustReference) console.log(`✓ recorded ${trustReference}`);
 };
