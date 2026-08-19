@@ -306,18 +306,6 @@ export const bootstrap = async (): Promise<void> => {
       },
     );
 
-    // GPG keys come from 1Password documents, so this needs `op` authenticated
-    // (earlier phase) but not the system switch. Inert until the references are
-    // configured.
-    state = await runPhase(
-      state,
-      'gpg-imported',
-      'GPG secret key + ownertrust import',
-      async () => {
-        await importGpgKeys();
-      },
-    );
-
     // Wait for the configuration share to sync before the first system rebuild.
     // The rebuild itself may rely on mackup-restored prefs; first switch should
     // not run blind. No-op if Resilio is disabled.
@@ -330,6 +318,17 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await ensureSystemRebuild();
       },
+    );
+
+    // After the switch, not before: `gpg` itself is installed by the switch, and
+    // home-manager is what creates `~/.gnupg`. Running earlier meant the import
+    // always hit the "`gpg` not found" path on a fresh machine. Needs `op`
+    // authenticated too, which an earlier phase handles.
+    state = await runPhase(
+      state,
+      'gpg-imported',
+      'GPG secret key + ownertrust import',
+      () => importGpgKeys(),
     );
 
     // mackup restore runs after the switch — mackup is installed by the switch,

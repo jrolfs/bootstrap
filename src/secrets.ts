@@ -223,7 +223,10 @@ export const runSecrets = async (
       });
     case 'gpg':
       if (subcommand === 'export') return await exportGpgKeys(positional[2]);
-      if (subcommand === 'import') return await importGpgKeys();
+      if (subcommand === 'import') {
+        await importGpgKeys();
+        return;
+      }
       throw new Error(`Unknown gpg subcommand: ${subcommand ?? '(none)'}`);
     case undefined:
     case 'help':

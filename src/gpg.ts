@@ -277,13 +277,16 @@ const importKeyring = async (
  * identity stays off a work machine. If a key later moves to a hardware token,
  * the on-disk files become stubs that `gpg --card-status` regenerates, and this
  * short-circuits on the presence check.
+ *
+ * @returns false when `gpg` isn't installed yet, so the caller leaves the phase
+ * unrecorded and a later run retries
  */
-export const importGpgKeys = async (): Promise<void> => {
+export const importGpgKeys = async (): Promise<boolean> => {
   const keyrings = keyringsForHost();
 
   if (keyrings.length === 0) {
     console.log('No gpg keyrings configured for this host; skipping');
-    return;
+    return true;
   }
 
   const gpg = await findGpg();
@@ -292,7 +295,7 @@ export const importGpgKeys = async (): Promise<void> => {
     console.log(
       yellow('`gpg` not found; skipping key import (re-run after the switch).'),
     );
-    return;
+    return false;
   }
 
   const manifest = await loadManifest();
@@ -300,6 +303,8 @@ export const importGpgKeys = async (): Promise<void> => {
   for (const keyring of keyrings) {
     await importKeyring(gpg, keyring, manifest);
   }
+
+  return true;
 };
 
 /**

@@ -64,13 +64,18 @@ export const runPhase = async (
   state: State,
   phase: Phase,
   description: string,
-  task: () => Promise<void>,
+  task: () => Promise<boolean | void>,
 ): Promise<State> => {
   if (hasPhase(state, phase)) {
     console.log(`✓ ${description} (cached)`);
     return state;
   }
 
-  await task();
-  return recordPhase(state, phase);
+  // A task that returns `false` declares itself *incomplete* rather than failed:
+  // the phase isn't recorded, so the next run tries again. Without this, a task
+  // that bails out gracefully — "the tool I need isn't installed yet, skipping" —
+  // gets recorded as done and never runs again.
+  const completed = await task();
+
+  return completed === false ? state : recordPhase(state, phase);
 };
