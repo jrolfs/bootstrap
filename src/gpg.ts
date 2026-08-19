@@ -151,7 +151,7 @@ const importKeyring = async (
     console.log(
       gray(
         `No \`${secretKeyName(keyring.name)}\` in the manifest; skipping ` +
-          `${keyring.name}. Run \`secrets gpg export ${keyring.name}\` from a ` +
+          `${keyring.name}. Run \`bootstrap secrets gpg export ${keyring.name}\` from a ` +
           'machine that holds it.',
       ),
     );

@@ -39,29 +39,55 @@ BOOTSTRAP_REF=flake-migration bash -c "$(curl -fsSL \
 6. **resilio-configured** (macOS) — installs Resilio Sync, seeds the config
    share (secret via `op`), and guides first-run + adding the `~/Configuration`
    share, then waits for it to sync.
-7. **first switch** — `darwin-rebuild` / `nixos-rebuild switch --flake
+7. **gpg-imported** — imports every GPG keyring this host is entitled to from
+   1Password, along with its ownertrust (see below).
+8. **first switch** — `darwin-rebuild` / `nixos-rebuild switch --flake
    ~/.config/system#<hostname>` (bootstrapped via `nix run` on the first run).
-8. **mackup-restored** (macOS) — confirmed `mackup restore` from the synced
+9. **mackup-restored** (macOS) — confirmed `mackup restore` from the synced
    `~/Configuration/mackup`.
 
 After the first switch on macOS: grant Full Disk Access to
 `/usr/local/bin/icon-customizer` (System Settings → Privacy & Security).
 
-## Development
+## The `bootstrap` command
 
-### Prerequisites
-
-- Devbox (or `nix run nixpkgs#deno`)
-
-### Running locally
+The system flake puts a single `bootstrap` binary on `PATH` (via
+`inputs.bootstrap.packages.${system}.bootstrap`), so a provisioned machine can
+manage its own secrets with no checkout:
 
 ```bash
-# Type check + lint
+bootstrap provision          # run every phase (idempotent; resumes)
+bootstrap secrets list       # what's in the manifest, and which apply here
+bootstrap secrets check      # verify every op:// reference resolves
+bootstrap secrets materialize
+bootstrap secrets gpg import
+bootstrap help
+```
+
+Everything is a subcommand of one binary rather than several binaries, so
+nothing generically named lands on `PATH` — `gpg` exists only as `bootstrap
+secrets gpg` and can never shadow the real one. That also makes bare `bootstrap`
+print usage instead of provisioning; the verb is always required.
+
+With nothing installed yet, `nix run github:jrolfs/bootstrap` still provisions —
+the flake app supplies `provision` for exactly that case. Reach the other
+subcommands with `nix run github:jrolfs/bootstrap#cli -- secrets list`.
+
+Mutating subcommands (`secrets add`, `secrets gpg export`) need a writable
+checkout, since only a working tree can be committed back to git.
+
+## Development
+
+```bash
+direnv allow   # or: nix develop
+```
+
+The dev shell puts a `bootstrap` on `PATH` that runs the *working tree*, so it
+shadows the installed one and edits take effect with no rebuild.
+
+```bash
 deno check src/*.ts
 deno lint src
-
-# Run the orchestrator directly
-nix run .#bootstrap
 ```
 
 ## Configuration

@@ -3,6 +3,7 @@
   "remote": {
     "https://deno.land/std@0.192.0/_util/asserts.ts": "178dfc49a464aee693a7e285567b3d0b555dc805ff490505a8aae34f9cfb1462",
     "https://deno.land/std@0.192.0/_util/os.ts": "d932f56d41e4f6a6093d56044e29ce637f8dcc43c5a90af43504a889cf1775e3",
+    "https://deno.land/std@0.192.0/flags/mod.ts": "17f444ddbee43c5487568de0c6a076c7729cfe90d96d2ffcd2b8f8adadafb6e8",
     "https://deno.land/std@0.192.0/fmt/colors.ts": "d67e3cd9f472535241a8e410d33423980bec45047e343577554d3356e1f0ef4e",
     "https://deno.land/std@0.192.0/fs/_util.ts": "fbf57dcdc9f7bc8128d60301eece608246971a7836a3bb1e78da75314f08b978",
     "https://deno.land/std@0.192.0/fs/copy.ts": "14214efd94fc3aa6db1e4af2b4b9578e50f7362b7f3725d5a14ad259a5df26c8",

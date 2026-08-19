@@ -35,7 +35,7 @@ export const configuration = configurationSchema.parse({
     secretsVault: 'Secrets',
   },
   gpg: {
-    // op:// references live in secrets.json, recorded by `secrets gpg export` —
+    // op:// references live in secrets.json, recorded by `bootstrap secrets gpg export` —
     // run that from a machine that already holds the material. Until then the
     // gpg-imported phase is inert.
     keyrings: [

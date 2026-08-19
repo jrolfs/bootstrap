@@ -185,7 +185,7 @@ const setupHomeshickAndPrivate = async (): Promise<void> => {
   await shell('bash', ['-c', `${homeshick} link --force private`]);
 };
 
-const bootstrap = async (): Promise<void> => {
+export const bootstrap = async (): Promise<void> => {
   try {
     environment();
 
@@ -355,6 +355,8 @@ const bootstrap = async (): Promise<void> => {
   }
 };
 
+// Kept so `deno run src/bootstrap.ts` still works when iterating on the phases
+// directly. The shipped path is `bootstrap provision` via src/cli.ts.
 if (import.meta.main) {
   bootstrap();
 }

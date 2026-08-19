@@ -1,4 +1,5 @@
-import { bold, gray, green, red, yellow } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
+import { bold, gray, green, red } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
+import { parse } from 'https://deno.land/std@0.192.0/flags/mod.ts';
 
 import { environment } from './configuration.ts';
 import { exportGpgKeys, importGpgKeys } from './gpg.ts';
@@ -13,62 +14,34 @@ import {
 import { readDocument, readSecret } from './onepassword.ts';
 
 /**
- * `secrets` — manage the 1Password-backed secret manifest.
+ * `bootstrap secrets` — manage the 1Password-backed secret manifest.
  *
  * The manifest (`secrets.json`) records `op://` references, which are not
- * secrets, so it is committed and reviewable. This CLI is the interface to it:
+ * secrets, so it is committed and reviewable. This is the interface to it:
  * capture material into 1Password, record where it lives, and put it back on a
  * new machine — the role the git-crypt'd castle used to play.
+ *
+ * Reached only through `src/cli.ts`; `gpg` stays a subcommand here rather than
+ * becoming its own binary precisely so it can't shadow the real `gpg`.
  */
 
-const USAGE = `${bold('secrets')} — 1Password-backed secret manifest
+export const SECRETS_USAGE =
+  `${bold('bootstrap secrets')} — 1Password-backed secret manifest
 
-  secrets list                       show manifest entries (● applies to this host)
-  secrets check                       verify every reference resolves
-  secrets materialize [<name>…]       write entries with a target to disk (0600)
-  secrets add <name> --reference <op://…> [options]
+  … list                              show entries (● applies to this host)
+  … check                             verify every reference resolves
+  … materialize [<name>…]             write entries with a target to disk (0600)
+  … add <name> --reference <op://…> [options]
                                       record an existing item's reference
-  secrets gpg export [<keyring>]      capture a keyring -> 1Password (default: first)
-  secrets gpg import                  import every keyring for this host
+  … gpg export [<keyring>]            capture a keyring -> 1Password (default: first)
+  … gpg import                        import every keyring for this host
 
   add options: --target <path-relative-to-$HOME> --mode <0600>
                --hosts <a,b|*> --kind <document|field> --description <text>
 
-Mutating commands (add, gpg export) need a writable checkout — run them via
-\`nix run .#secrets\` from a clone, not \`nix run github:…\`. \`secrets list\`
-prints which manifest resolved; SECRETS_MANIFEST overrides it.`;
-
-interface ParsedArgs {
-  readonly positional: readonly string[];
-  readonly flags: Readonly<Record<string, string>>;
-}
-
-const parseArgs = (argv: readonly string[]): ParsedArgs => {
-  const positional: string[] = [];
-  const flags: Record<string, string> = {};
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === undefined) continue;
-
-    if (argument.startsWith('--')) {
-      const key = argument.slice(2);
-      const next = argv[index + 1];
-
-      if (next !== undefined && !next.startsWith('--')) {
-        flags[key] = next;
-        index += 1;
-      } else {
-        flags[key] = 'true';
-      }
-      continue;
-    }
-
-    positional.push(argument);
-  }
-
-  return { positional, flags };
-};
+Mutating commands (add, gpg export) need a writable checkout — run them from a
+clone, not \`nix run github:…\`. \`bootstrap secrets list\` prints which manifest
+resolved; SECRETS_MANIFEST overrides it.`;
 
 const list = async (): Promise<void> => {
   const manifest = await loadManifest();
@@ -80,7 +53,9 @@ const list = async (): Promise<void> => {
   console.log(gray(`\nmanifest: ${await manifestPath()}`));
 
   if (names.length === 0) {
-    console.log(gray('Manifest is empty. `secrets gpg export` is a good start.'));
+    console.log(
+      gray('Manifest is empty. `bootstrap secrets gpg export` is a good start.'),
+    );
     return;
   }
 
@@ -171,24 +146,35 @@ const materialize = async (only: readonly string[]): Promise<void> => {
   }
 };
 
+interface AddOptions {
+  readonly reference?: string;
+  readonly kind?: string;
+  readonly description?: string;
+  readonly target?: string;
+  readonly mode?: string;
+  readonly hosts?: string;
+}
+
 const add = async (
   name: string | undefined,
-  flags: Readonly<Record<string, string>>,
+  options: AddOptions,
 ): Promise<void> => {
-  if (!name) throw new Error('`secrets add` requires a name');
-  if (!flags['reference']) {
-    throw new Error('`secrets add` requires --reference op://Vault/Item[/field]');
+  if (!name) throw new Error('`bootstrap secrets add` requires a name');
+  if (!options.reference) {
+    throw new Error(
+      '`bootstrap secrets add` requires --reference op://Vault/Item[/field]',
+    );
   }
 
   const manifest = await loadManifest();
 
   const entry = secretEntrySchema.parse({
-    kind: flags['kind'] ?? 'document',
-    reference: flags['reference'],
-    description: flags['description'] ?? '',
-    target: flags['target'],
-    mode: flags['mode'] ?? '0600',
-    hosts: flags['hosts'] ? flags['hosts'].split(',') : ['*'],
+    kind: options.kind ?? 'document',
+    reference: options.reference,
+    description: options.description ?? '',
+    target: options.target,
+    mode: options.mode ?? '0600',
+    hosts: options.hosts ? options.hosts.split(',') : ['*'],
   });
 
   await saveManifest({
@@ -199,45 +185,52 @@ const add = async (
   console.log(`${green('✓')} recorded ${bold(name)} → ${entry.reference}`);
 };
 
-const main = async (): Promise<void> => {
-  const { positional, flags } = parseArgs(Deno.args);
+/**
+ * Dispatches the `secrets` subcommand tree.
+ *
+ * Throws rather than exiting: `src/cli.ts` owns error reporting so every
+ * subcommand fails the same way.
+ *
+ * @param argv Arguments after `secrets`
+ */
+export const runSecrets = async (
+  argv: readonly string[],
+): Promise<void> => {
+  // Every option is declared a string: std's parser is numeric by default, so
+  // `--mode 0600` would otherwise arrive as the number 600 with the leading
+  // zero silently dropped.
+  const parsed = parse([...argv], {
+    string: ['reference', 'kind', 'description', 'target', 'mode', 'hosts'],
+  });
+  const positional = parsed._.map(String);
   const [command, subcommand] = positional;
 
-  try {
-    switch (command) {
-      case 'list':
-        await list();
-        return;
-      case 'check':
-        await check();
-        return;
-      case 'materialize':
-        await materialize(positional.slice(1));
-        return;
-      case 'add':
-        await add(subcommand, flags);
-        return;
-      case 'gpg':
-        if (subcommand === 'export') {
-          return await exportGpgKeys(positional[2]);
-        }
-        if (subcommand === 'import') return await importGpgKeys();
-        throw new Error(`Unknown gpg subcommand: ${subcommand ?? '(none)'}`);
-      case undefined:
-      case 'help':
-      case '--help':
-        console.log(USAGE);
-        return;
-      default:
-        throw new Error(`Unknown command: ${command}`);
-    }
-  } catch (error) {
-    console.error(
-      red(error instanceof Error ? error.message : String(error)),
-    );
-    console.error(yellow('\nRun `secrets help` for usage.'));
-    Deno.exit(1);
+  switch (command) {
+    case 'list':
+      return await list();
+    case 'check':
+      return await check();
+    case 'materialize':
+      return await materialize(positional.slice(1));
+    case 'add':
+      return await add(subcommand, {
+        reference: parsed['reference'],
+        kind: parsed['kind'],
+        description: parsed['description'],
+        target: parsed['target'],
+        mode: parsed['mode'],
+        hosts: parsed['hosts'],
+      });
+    case 'gpg':
+      if (subcommand === 'export') return await exportGpgKeys(positional[2]);
+      if (subcommand === 'import') return await importGpgKeys();
+      throw new Error(`Unknown gpg subcommand: ${subcommand ?? '(none)'}`);
+    case undefined:
+    case 'help':
+    case '--help':
+      console.log(SECRETS_USAGE);
+      return;
+    default:
+      throw new Error(`Unknown secrets command: ${command}`);
   }
 };
-
-if (import.meta.main) main();

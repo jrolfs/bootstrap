@@ -9,7 +9,7 @@ import { pathExists } from './helpers.ts';
  *
  * References are *not* secrets, so this file is committed: it's the reviewable
  * source of truth for "which 1Password item holds what, and where does it go on
- * disk". That's what makes `secrets materialize` a single command — the
+ * disk". That's what makes `bootstrap secrets materialize` a single command — the
  * equivalent of `homeshick link private` — and it means a lost reference is a
  * `git log` away rather than a hunt through the vault.
  */
@@ -23,7 +23,7 @@ export const secretEntrySchema = z.object({
   kind: z.enum(['document', 'field']).default('document'),
   /** `op://Vault/Item[/field]`, or a short form resolved against the vault. */
   reference: z.string().min(1),
-  /** What this is, for `secrets list`. */
+  /** What this is, for `bootstrap secrets list`. */
   description: z.string().default(''),
   /**
    * Where `materialize` writes it, relative to `$HOME`. Omit for secrets that a

@@ -36,114 +36,108 @@
           "--allow-write"
         ];
 
-        # Both entry points share the same runtime PATH and deno permissions and
-        # differ only in module — and, for bootstrap, in priming sudo up front.
+        # One binary, `bootstrap`, dispatching every subcommand — so nothing
+        # generically-named lands on PATH. `gpg` in particular exists only as
+        # `bootstrap secrets gpg`, where it cannot shadow the real one.
+        #
+        # Sudo is primed only for `provision`: it's the one subcommand that runs
+        # a system activation, and `bootstrap secrets list` shouldn't prompt.
         #
         # `cd ${./src}` puts the CWD in the nix store, which is why the rebuild
         # invocation in src/nix.ts sets an explicit cwd: a bare `nix run` with no
         # attribute would otherwise resolve `.` to that store path.
-        entry = { name, module, primeSudo ? false }:
-          pkgs.writeScriptBin name ''
-            #!${pkgs.bash}/bin/bash
-            set -e
+        bootstrap = pkgs.writeScriptBin "bootstrap" ''
+          #!${pkgs.bash}/bin/bash
+          set -e
 
-            ${pkgs.lib.optionalString primeSudo ''
-              # Cache sudo credentials, then keep them warm for the long
-              # activation that follows.
-              sudo -v
-              (while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null) &
-            ''}
+          if [ "$1" = "provision" ]; then
+            # Cache sudo credentials, then keep them warm for the long
+            # activation that follows.
+            sudo -v
+            (while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null) &
+          fi
 
-            export PATH=${runtimePath}
+          export PATH=${runtimePath}
 
-            # `cd` below throws away the directory the user ran from, which is
-            # the only way to find their checkout — the store copy of `src/` has
-            # no path back to it. src/manifest.ts walks up from here.
-            export BOOTSTRAP_INVOCATION_DIR="$PWD"
+          # `cd` below throws away the directory the user ran from, which is
+          # the only way to find their checkout — the store copy of `src/` has
+          # no path back to it. src/manifest.ts walks up from here.
+          export BOOTSTRAP_INVOCATION_DIR="$PWD"
 
-            # Read-only fallback for `nix run github:…#secrets`, where there is
-            # no checkout at all: mutating commands still refuse it, but the
-            # `gpg import` read path works with nothing cloned.
-            export SECRETS_MANIFEST_STORE=${./secrets.json}
+          # Read-only fallback for `nix run github:…`, where there is no
+          # checkout at all: mutating commands still refuse it, but the
+          # `secrets gpg import` read path works with nothing cloned.
+          export SECRETS_MANIFEST_STORE=${./secrets.json}
 
-            cd ${./src}
+          cd ${./src}
 
-            exec ${pkgs.deno}/bin/deno run \
-              ${pkgs.lib.concatStringsSep " \\\n              " denoFlags} \
-              ${module} "$@"
-          '';
+          exec ${pkgs.deno}/bin/deno run \
+            ${pkgs.lib.concatStringsSep " \\\n            " denoFlags} \
+            cli.ts "$@"
+        '';
 
-        # Same flags as `entry`, but running the *working tree* instead of the
-        # store copy, so edits take effect with no rebuild. Deliberately does not
-        # `cd`: staying put is what lets src/manifest.ts find the checkout.
-        devEntry = { name, module }:
-          pkgs.writeShellScriptBin name ''
-            root=$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
-
-            exec ${pkgs.deno}/bin/deno run \
-              ${pkgs.lib.concatStringsSep " \\\n              " denoFlags} \
-              "$root/src/${module}" "$@"
-          '';
-
-        bootstrap = entry {
-          name = "bootstrap";
-          module = "bootstrap.ts";
-          primeSudo = true;
-        };
-
-        # Exposed as a package so the system flake can put it on PATH:
+        # Same flags, but running the *working tree* so edits take effect with no
+        # rebuild. Deliberately does not `cd`: staying put is what lets
+        # src/manifest.ts find the checkout.
         #
-        #   inputs.bootstrap.packages.${system}.secrets
-        #
-        # and runnable with no checkout at all via
-        # `nix run github:jrolfs/bootstrap#secrets`, which is what breaks the
-        # chicken-and-egg during migration. Reads work there off the store copy
-        # of the manifest; mutating subcommands need `nix run .#secrets` from a
-        # clone, since only a working tree can be written back to git.
-        secrets = entry {
-          name = "secrets";
-          module = "secrets.ts";
+        # No sudo priming — `provision` from a dev shell drops into the same
+        # `sudo -v` the phases perform themselves, just later.
+        bootstrapDev = pkgs.writeShellScriptBin "bootstrap" ''
+          root=$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+
+          exec ${pkgs.deno}/bin/deno run \
+            ${pkgs.lib.concatStringsSep " \\\n            " denoFlags} \
+            "$root/src/cli.ts" "$@"
+        '';
+
+        provisionApp = {
+          type = "app";
+          program = "${pkgs.writeShellScript "bootstrap-provision" ''
+            exec ${bootstrap}/bin/bootstrap provision "$@"
+          ''}";
         };
 
       in
       {
+        # Exposed as a package so the system flake can put it on PATH:
+        #
+        #   inputs.bootstrap.packages.${system}.bootstrap
+        #
+        # and runnable with no checkout at all via
+        # `nix run github:jrolfs/bootstrap`, which is what breaks the
+        # chicken-and-egg during migration. Reads work there off the store copy
+        # of the manifest; mutating subcommands need a clone, since only a
+        # working tree can be written back to git.
         packages = {
-          inherit bootstrap secrets;
+          inherit bootstrap;
           default = bootstrap;
         };
 
-        # `nix develop` for working on the CLI. `secrets` here shadows the
-        # system-wide one from the system flake — which is the point of being in
-        # this repo, since otherwise you'd edit src/ and keep running the pinned
-        # revision.
+        # `nix develop` for working on the CLI. This `bootstrap` shadows the one
+        # from the system closure — the point of being in this repo, since
+        # otherwise you'd edit src/ and keep running the pinned revision.
         #
-        # The bootstrap entry point is *not* shadowed and is renamed: it primes
-        # sudo and rebuilds the system, so it shouldn't be one typo away.
+        # Safe to shadow under the same name now that the verb is mandatory:
+        # bare `bootstrap` prints usage instead of rebuilding the system.
         devShells.default = pkgs.mkShell {
-          packages = [
-            pkgs.deno
-            (devEntry { name = "secrets"; module = "secrets.ts"; })
-            (devEntry { name = "bootstrap-dev"; module = "bootstrap.ts"; })
-          ];
+          packages = [ pkgs.deno bootstrapDev ];
 
           shellHook = ''
-            echo "bootstrap dev shell: \`secrets\` runs ./src (shadows the installed one)"
-            echo "                     \`bootstrap-dev\` runs the full bootstrap — it rebuilds the system"
+            echo "bootstrap dev shell: \`bootstrap\` runs ./src (shadows the installed one)"
           '';
         };
 
-        src = ./src;
-
         apps = {
-          bootstrap = {
-            type = "app";
-            program = "${bootstrap}/bin/bootstrap";
-          };
-          secrets = {
-            type = "app";
-            program = "${secrets}/bin/secrets";
-          };
-          default = {
+          # Supplies `provision` so the fresh-machine one-liner stays
+          # `nix run github:jrolfs/bootstrap` — there's no checkout and nothing
+          # on PATH at that point, so it's the one place a bare invocation
+          # should mean "do the thing".
+          bootstrap = provisionApp;
+          default = provisionApp;
+
+          # Escape hatch for every other subcommand with nothing installed, e.g.
+          # `nix run github:jrolfs/bootstrap#cli -- secrets list`.
+          cli = {
             type = "app";
             program = "${bootstrap}/bin/bootstrap";
           };
