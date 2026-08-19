@@ -261,7 +261,7 @@ export const bootstrap = async (): Promise<void> => {
       state = await runPhase(
         state,
         'op-authenticated',
-        '1Password CLI authenticated (`op whoami`)',
+        '1Password CLI authorized (`op vault list`)',
         async () => {
           await ensureOpAuthenticated();
         },

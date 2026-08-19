@@ -37,8 +37,6 @@ const requireOp = (): Promise<string> => requireBrewBinary('op');
  * "multiple accounts found" on a machine signed into both a personal and a work
  * account, and vault names aren't unique across accounts, so the flag makes
  * resolution deterministic rather than dependent on desktop-app state.
- *
- * Not applicable to `whoami` — see `isOpAuthenticated`.
  */
 const opFlags = (): readonly string[] => {
   const account = configuration.onePassword?.account;
@@ -106,20 +104,27 @@ export const ensureOpInstalled = async (): Promise<void> => {
 };
 
 /**
- * Returns true when `op whoami` succeeds — meaning the CLI has a valid
- * session token (either via GUI integration or a saved `op signin` session).
+ * Returns true when `op` can actually read from the account.
+ *
+ * Probes with a data command rather than `whoami`, which only *reports* an
+ * existing session and can't establish one: under desktop-app integration the
+ * app delegates a session in response to a request that needs data, so on a
+ * machine where no `op` command has run yet `whoami` fails with "account is not
+ * signed in" no matter how correctly the GUI integration is configured. Measured
+ * back to back on a healthy host — `whoami` fails, `vault list` succeeds, and
+ * `whoami` then succeeds because the read established the session it reports.
+ *
+ * `vault list` is the cheapest command that proves what the phases downstream
+ * need: not a session in the abstract, but authorized reads.
  */
 const isOpAuthenticated = async (): Promise<boolean> => {
   const op = await findBrewBinary('op');
   if (!op) return false;
-  // Deliberately *not* passing `--account`. With desktop-app integration
-  // `whoami` reports the session the app is providing, and adding the flag makes
-  // `op` look for an explicit `op signin` session for that account instead —
-  // which doesn't exist, so it fails with "account is not signed in" on a
-  // perfectly healthy machine. Data commands take the flag happily; this one
-  // does not. Adding it here would make the probe always fail and send
-  // `ensureOpAuthenticated` through its guided loop into a throw.
-  const result = await shell(op, ['whoami'], { error: false });
+
+  const result = await shell(op, ['vault', 'list', ...opFlags()], {
+    error: false,
+  });
+
   return result.success;
 };
 
@@ -155,11 +160,12 @@ const guideGuiIntegration = async (): Promise<void> => {
           '  1. Open 1Password (the GUI app) and sign in.',
           '  2. Open Settings -> Developer.',
           '  3. Check "Integrate with 1Password CLI".',
-          '  4. Approve the biometric prompt.',
+          '  4. Make sure Settings -> Security -> unlock with Touch ID is on;',
+          '     the integration delegates sessions through it.',
           '',
-          '  Once enabled, `op whoami` should succeed without an explicit',
-          '  signin — biometric unlocks are forwarded from the GUI to the',
-          '  CLI automatically.',
+          '  Pressing Enter below runs a read against your account, which is',
+          '  what makes the app delegate a session — approve the biometric',
+          '  prompt when it appears. No password or session token is typed.',
         ].join('\n'),
       ),
   );
@@ -173,7 +179,7 @@ const guideGuiIntegration = async (): Promise<void> => {
 };
 
 /**
- * Ensures `op whoami` succeeds via the 1Password desktop app's CLI
+ * Ensures `op` can read from the account via the 1Password desktop app's CLI
  * integration. No passwords or session tokens are involved. Whenever the app
  * is installed `op` defers to it, so this is the path that actually works —
  * and it's not macOS-specific: the Linux desktop app offers the same
@@ -182,7 +188,7 @@ const guideGuiIntegration = async (): Promise<void> => {
  * Loops the guided flow so the user can retry without re-running bootstrap.
  *
  * There's no way to detect that the "Integrate with 1Password CLI" toggle is
- * enabled short of trying `op whoami`, so we guide, then probe.
+ * enabled short of asking `op` for data, so we guide, then probe.
  *
  * A *truly* headless host (no desktop session at all) should use a 1Password
  * service account via `OP_SERVICE_ACCOUNT_TOKEN` rather than interactive
@@ -220,14 +226,20 @@ export const ensureOpAuthenticated = async (): Promise<void> => {
     }
 
     console.log(
-      yellow('`op whoami` still failing — check the toggle and try again.'),
+      yellow(
+        "`op` still can't read from the account — check the toggle, make sure " +
+          'the app is unlocked, and try again.',
+      ),
     );
   }
 
   throw new Error(
     '1Password CLI authentication did not complete. Enable Settings -> ' +
       'Developer -> "Integrate with 1Password CLI" in the desktop app, ' +
-      'confirm `op whoami` succeeds, then re-run bootstrap.',
+      'confirm `op vault list` succeeds, then re-run bootstrap. Note that ' +
+      '`op whoami` is not a useful check here — it reports an existing ' +
+      'session rather than establishing one, so it fails until some other ' +
+      'command has been authorized.',
   );
 };
 
