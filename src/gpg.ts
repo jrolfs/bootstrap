@@ -54,6 +54,18 @@ const homeFor = (keyring: GpgKeyring): string | null => {
 };
 
 /**
+ * The directory gpg will actually use for this keyring, pinned or not.
+ *
+ * Distinct from `homeFor`, whose null means "don't inject GNUPGHOME" — the
+ * default home still has to exist at 0700 or gpg warns about unsafe permissions
+ * on every invocation. On a freshly provisioned machine that directory is
+ * created by home-manager linking gpg.conf into it, which makes it 0755.
+ */
+const effectiveHome = (keyring: GpgKeyring): string =>
+  homeFor(keyring) ?? Deno.env.get('GNUPGHOME') ??
+    `${environment().HOME}/.gnupg`;
+
+/**
  * Runs `gpg` scoped to a keyring.
  *
  * GNUPGHOME is set in the environment rather than passing `--homedir` so the
@@ -167,11 +179,11 @@ const importKeyring = async (
 
   const home = homeFor(keyring);
 
-  // A fresh GNUPGHOME has to exist with 0700 before gpg will use it.
-  if (home) {
-    await Deno.mkdir(home, { recursive: true, mode: 0o700 });
-    await Deno.chmod(home, 0o700);
-  }
+  // Has to exist at 0700 before gpg will use it without complaint. Applied to
+  // the default home too, not just a pinned one — see `effectiveHome`.
+  const directory = effectiveHome(keyring);
+  await Deno.mkdir(directory, { recursive: true, mode: 0o700 });
+  await Deno.chmod(directory, 0o700);
 
   const gpgEnvironment = home
     ? { ...Deno.env.toObject(), GNUPGHOME: home }
