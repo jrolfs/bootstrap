@@ -90,6 +90,15 @@ export const gpgConfigurationSchema = z.object({
 
 export const onePasswordConfigurationSchema = z.object({
   /**
+   * Account (sign-in address or user ID) to pass as `--account`.
+   *
+   * `op` refuses to guess: with more than one account configured every
+   * invocation fails with "multiple accounts found", including `op whoami`. A
+   * machine signed into both a personal and a work account is the normal case,
+   * so pin the one holding these secrets. Omit when there's only ever one.
+   */
+  account: z.string().min(1).optional(),
+  /**
    * Default vault used to expand short-form secret references (e.g.
    * `Item/field` -> `op://<vault>/Item/field`). Modules that fetch secrets
    * pass references through `readSecret`, which performs the expansion.

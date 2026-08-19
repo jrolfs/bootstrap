@@ -20,6 +20,10 @@ export const configuration = configurationSchema.parse({
   privateCastleRepo: 'git@github.com:jrolfs/private.git',
   vscodeSyncRepo: 'git@github.com:jrolfs/vscode.git',
   onePassword: {
+    // Personal account. Required rather than optional in practice: a machine
+    // signed into this and the work account makes every bare `op` call fail
+    // with "multiple accounts found".
+    account: 'rolfers.1password.com',
     // Default vault for expanding short-form references.
     vault: 'Private',
     // Where the `secrets` CLI creates items. A dedicated vault keeps machine

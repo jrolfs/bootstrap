@@ -21,11 +21,15 @@ export interface ShellOptions extends Deno.CommandOptions {
    */
   stream?: boolean;
   /**
-   * Withhold output from the terminal. It is still captured and returned.
+   * Withhold *stdout* from the terminal. It is still captured and returned.
    *
    * Set this for anything carrying key material. `shell` echoes every chunk as
    * it drains, so without it a `gpg --export-secret-keys` puts the whole
    * armored block into the scrollback — and into any log the user saves.
+   *
+   * stderr is deliberately still shown: `op` and `gpg` write payloads to stdout
+   * and diagnostics to stderr, so hiding both turns any failure into a silent
+   * one.
    *
    * Takes precedence over `stream`, since inherited output can't be withheld.
    */
@@ -79,7 +83,7 @@ export const shell = async (
     blue('‾'.repeat(wrap)),
   );
 
-  if (secret) console.log(gray(' (output withheld — carries secret material)'));
+  if (secret) console.log(gray(' (stdout withheld — carries secret material)'));
 
   const process = new Deno.Command(command, {
     args,
@@ -105,7 +109,7 @@ export const shell = async (
       key: 'stdout' | 'stderr',
     ): Promise<void> => {
       for await (const chunk of source) {
-        if (!secret) await sink.write(chunk);
+        if (!(secret && key === 'stdout')) await sink.write(chunk);
         chunks[key] = new Uint8Array([...chunks[key], ...chunk]);
       }
     };

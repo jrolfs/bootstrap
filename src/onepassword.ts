@@ -31,6 +31,22 @@ const findGuiApp = async (): Promise<string | null> => {
 const requireOp = (): Promise<string> => requireBrewBinary('op');
 
 /**
+ * Global flags for `op` *data* commands (read, document get, item get, …).
+ *
+ * `--account` pins which account is used. Without it `op` can fail with
+ * "multiple accounts found" on a machine signed into both a personal and a work
+ * account, and vault names aren't unique across accounts, so the flag makes
+ * resolution deterministic rather than dependent on desktop-app state.
+ *
+ * Not applicable to `whoami` — see `isOpAuthenticated`.
+ */
+const opFlags = (): readonly string[] => {
+  const account = configuration.onePassword?.account;
+
+  return account ? ['--account', account] : [];
+};
+
+/**
  * Reusable interface to the 1Password CLI (`op`).
  *
  * This module is intentionally generic: bootstrap modules that need secrets
@@ -96,6 +112,13 @@ export const ensureOpInstalled = async (): Promise<void> => {
 const isOpAuthenticated = async (): Promise<boolean> => {
   const op = await findBrewBinary('op');
   if (!op) return false;
+  // Deliberately *not* passing `--account`. With desktop-app integration
+  // `whoami` reports the session the app is providing, and adding the flag makes
+  // `op` look for an explicit `op signin` session for that account instead —
+  // which doesn't exist, so it fails with "account is not signed in" on a
+  // perfectly healthy machine. Data commands take the flag happily; this one
+  // does not. Adding it here would make the probe always fail and send
+  // `ensureOpAuthenticated` through its guided loop into a throw.
   const result = await shell(op, ['whoami'], { error: false });
   return result.success;
 };
@@ -253,7 +276,7 @@ const normalizeReference = (reference: string): string => {
 const opRead = async (
   reference: string,
 ): Promise<{ success: true; value: string } | { success: false; stderr: string }> => {
-  const result = await shell(await requireOp(), ['read', reference], {
+  const result = await shell(await requireOp(), ['read', reference, ...opFlags()], {
     error: false,
     secret: true,
   });
@@ -295,6 +318,49 @@ export const readSecret = async (reference: string): Promise<string> => {
   );
 };
 
+interface DocumentReference {
+  /** Item title, UUID, or domain — whatever `op document get` will accept. */
+  readonly item: string;
+  /** Vault to scope the lookup to, when one could be determined. */
+  readonly vault: string | undefined;
+}
+
+/**
+ * Splits a document reference into the item and vault `op document get` wants.
+ *
+ * `op document get` does *not* understand `op://` references — it fails with
+ * `"op://…" isn't an item. Specify the item with its UUID, name, or domain.`
+ * Only `op read` parses that syntax, and only for *field* references. Since
+ * `createDocument` records `op://Vault/Item` in the manifest (opaque UUIDs would
+ * defeat the point of a reviewable, committed manifest), the reference has to be
+ * taken apart again here.
+ *
+ * Anything that isn't an `op://Vault/Item` is passed through untouched, so a
+ * bare title or UUID still works, with the default vault applied.
+ */
+const parseDocumentReference = (reference: string): DocumentReference => {
+  const fallbackVault = configuration.onePassword?.vault;
+
+  if (!reference.startsWith('op://')) {
+    return { item: reference, vault: fallbackVault };
+  }
+
+  const [vault, ...rest] = reference.slice('op://'.length).split('/').filter(
+    (segment) => segment.length > 0,
+  );
+
+  if (!vault || rest.length === 0) {
+    throw new Error(
+      `Unusable 1Password document reference "${reference}": expected ` +
+        'op://Vault/Item.',
+    );
+  }
+
+  // A third segment makes it a *field* reference, which belongs to `op read`.
+  // Documents are whole items, so anything beyond the vault is the title.
+  return { item: rest.join('/'), vault };
+};
+
 /**
  * Fetches a 1Password *document* (file attachment) by name or `op://Vault/Item`
  * reference, returning its contents.
@@ -311,15 +377,16 @@ export const readSecret = async (reference: string): Promise<string> => {
 export const readDocument = async (
   nameOrReference: string,
 ): Promise<string> => {
-  const vault = configuration.onePassword?.vault;
-
   const args = (): string[] => {
-    if (nameOrReference.startsWith('op://')) {
-      return ['document', 'get', nameOrReference];
-    }
-    return vault
-      ? ['document', 'get', nameOrReference, '--vault', vault]
-      : ['document', 'get', nameOrReference];
+    const { item, vault } = parseDocumentReference(nameOrReference);
+
+    return [
+      'document',
+      'get',
+      item,
+      ...(vault ? ['--vault', vault] : []),
+      ...opFlags(),
+    ];
   };
 
   const attempt = async () =>
@@ -381,12 +448,24 @@ export const createDocument = async (
 
   const op = await requireOp();
 
-  const exists = await shell(op, ['item', 'get', title, '--vault', vault], {
-    error: false,
-  });
+  const exists = await shell(
+    op,
+    ['item', 'get', title, '--vault', vault, ...opFlags()],
+    { error: false },
+  );
 
   const args = exists.success
-    ? ['document', 'edit', title, '-', '--vault', vault, '--file-name', fileName]
+    ? [
+      'document',
+      'edit',
+      title,
+      '-',
+      '--vault',
+      vault,
+      '--file-name',
+      fileName,
+      ...opFlags(),
+    ]
     : [
       'document',
       'create',
@@ -397,6 +476,7 @@ export const createDocument = async (
       vault,
       '--file-name',
       fileName,
+      ...opFlags(),
     ];
 
   const child = new Deno.Command(op, {
