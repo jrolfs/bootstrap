@@ -58,7 +58,7 @@ export type Manifest = z.infer<typeof manifestSchema>;
  * Marks a directory as a checkout of this repo. Both are required: `flake.nix`
  * alone matches any flake the CLI happens to be invoked from.
  */
-const CHECKOUT_MARKERS = ['flake.nix', 'src/secrets.ts'] as const;
+const CHECKOUT_MARKERS = ['flake.nix', 'src/cli.ts'] as const;
 
 /**
  * Nearest enclosing checkout of this repo, or null.
@@ -67,9 +67,9 @@ const CHECKOUT_MARKERS = ['flake.nix', 'src/secrets.ts'] as const;
  * `import.meta.url`. The flake wrapper `cd`s into the store copy of `src/`
  * before exec'ing deno, so a module-relative path resolves to a bare
  * `/nix/store/secrets.json` that exists under no circumstances, and it does so
- * for `nix run .#secrets` in a clone exactly as much as for
- * `nix run github:…`. The wrapper exports the pre-`cd` directory as
- * `BOOTSTRAP_INVOCATION_DIR` so this can recover it.
+ * for `nix run .#cli` in a clone exactly as much as for `nix run github:…`. The
+ * wrapper exports the pre-`cd` directory as `BOOTSTRAP_INVOCATION_DIR` so this
+ * can recover it.
  */
 const findCheckout = async (): Promise<string | null> => {
   const start = Deno.env.get('BOOTSTRAP_INVOCATION_DIR') ?? Deno.cwd();
@@ -98,10 +98,10 @@ interface ManifestLocation {
 /**
  * Where the manifest lives for this invocation.
  *
- * A checkout wins, so `nix run .#secrets` writes to the working tree. Failing
- * that the flake-baked store copy is used, which lets a checkout-less
- * `nix run github:jrolfs/bootstrap#secrets` still *read* the committed manifest
- * — the case the `gpg-imported` bootstrap phase depends on.
+ * A checkout wins, so `nix run .#cli` writes to the working tree. Failing that
+ * the flake-baked store copy is used, which lets a checkout-less
+ * `nix run github:jrolfs/bootstrap#cli` still *read* the committed manifest —
+ * the case the `gpg-imported` bootstrap phase depends on.
  */
 const manifestLocation = async (): Promise<ManifestLocation> => {
   const override = Deno.env.get('SECRETS_MANIFEST');
@@ -147,9 +147,9 @@ export const saveManifest = async (manifest: Manifest): Promise<void> => {
   if (!writable) {
     throw new Error(
       `Cannot write the manifest: ${path} is in the nix store.\n` +
-        'Mutating commands need a writable checkout — run `nix run .#secrets ' +
-        '-- …` from a clone of this repo, or point SECRETS_MANIFEST at the ' +
-        'file directly.',
+        'Mutating commands need a writable checkout — run `bootstrap` from a ' +
+        'clone of this repo (its dev shell provides one), or point ' +
+        'SECRETS_MANIFEST at the file directly.',
     );
   }
 
