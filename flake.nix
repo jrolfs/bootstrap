@@ -73,6 +73,18 @@
               ${module} "$@"
           '';
 
+        # Same flags as `entry`, but running the *working tree* instead of the
+        # store copy, so edits take effect with no rebuild. Deliberately does not
+        # `cd`: staying put is what lets src/manifest.ts find the checkout.
+        devEntry = { name, module }:
+          pkgs.writeShellScriptBin name ''
+            root=$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+
+            exec ${pkgs.deno}/bin/deno run \
+              ${pkgs.lib.concatStringsSep " \\\n              " denoFlags} \
+              "$root/src/${module}" "$@"
+          '';
+
         bootstrap = entry {
           name = "bootstrap";
           module = "bootstrap.ts";
@@ -98,6 +110,26 @@
         packages = {
           inherit bootstrap secrets;
           default = bootstrap;
+        };
+
+        # `nix develop` for working on the CLI. `secrets` here shadows the
+        # system-wide one from the system flake — which is the point of being in
+        # this repo, since otherwise you'd edit src/ and keep running the pinned
+        # revision.
+        #
+        # The bootstrap entry point is *not* shadowed and is renamed: it primes
+        # sudo and rebuilds the system, so it shouldn't be one typo away.
+        devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs.deno
+            (devEntry { name = "secrets"; module = "secrets.ts"; })
+            (devEntry { name = "bootstrap-dev"; module = "bootstrap.ts"; })
+          ];
+
+          shellHook = ''
+            echo "bootstrap dev shell: \`secrets\` runs ./src (shadows the installed one)"
+            echo "                     \`bootstrap-dev\` runs the full bootstrap — it rebuilds the system"
+          '';
         };
 
         src = ./src;
