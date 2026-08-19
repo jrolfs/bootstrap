@@ -64,11 +64,13 @@ const runGpg = async (
   gpg: string,
   keyring: GpgKeyring,
   args: readonly string[],
+  { secret = false }: { secret?: boolean } = {},
 ) => {
   const home = homeFor(keyring);
 
   return await shell(gpg, [...args], {
     error: false,
+    secret,
     ...(home ? { env: { ...Deno.env.toObject(), GNUPGHOME: home } } : {}),
   });
 };
@@ -330,7 +332,7 @@ export const exportGpgKeys = async (name?: string): Promise<void> => {
     '--armor',
     '--export-secret-keys',
     ...(keyring.fingerprint ? [keyring.fingerprint] : []),
-  ]);
+  ], { secret: true });
 
   if (!exported.success || !exported.stdout.includes('PRIVATE KEY BLOCK')) {
     throw new Error(
@@ -348,7 +350,14 @@ export const exportGpgKeys = async (name?: string): Promise<void> => {
   // only artifact that carries other people's keys, and a keyring is not
   // reproducible without them. Not sensitive, but kept in the same store so
   // there's one mechanism.
-  const publicKeys = await runGpg(gpg, keyring, ['--batch', '--armor', '--export']);
+  // Withheld not because it's sensitive but because it's ~170KB of armor that
+  // buries the rest of the run.
+  const publicKeys = await runGpg(
+    gpg,
+    keyring,
+    ['--batch', '--armor', '--export'],
+    { secret: true },
+  );
 
   const publicReference =
     publicKeys.success && publicKeys.stdout.includes('PUBLIC KEY BLOCK')

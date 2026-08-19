@@ -6,6 +6,7 @@ import {
   appliesToHost,
   entriesForHost,
   loadManifest,
+  manifestPath,
   saveManifest,
   secretEntrySchema,
 } from './manifest.ts';
@@ -34,7 +35,8 @@ const USAGE = `${bold('secrets')} — 1Password-backed secret manifest
                --hosts <a,b|*> --kind <document|field> --description <text>
 
 Mutating commands (add, gpg export) need a writable checkout — run them via
-\`nix run .#secrets\` from a clone, not \`nix run github:…\`.`;
+\`nix run .#secrets\` from a clone, not \`nix run github:…\`. \`secrets list\`
+prints which manifest resolved; SECRETS_MANIFEST overrides it.`;
 
 interface ParsedArgs {
   readonly positional: readonly string[];
@@ -73,6 +75,10 @@ const list = async (): Promise<void> => {
   const { hostname } = environment();
   const names = Object.keys(manifest.secrets).sort();
 
+  // Printed unconditionally: which file is in play is the first thing to check
+  // when a manifest looks unexpectedly empty or a write is refused.
+  console.log(gray(`\nmanifest: ${await manifestPath()}`));
+
   if (names.length === 0) {
     console.log(gray('Manifest is empty. `secrets gpg export` is a good start.'));
     return;
@@ -104,6 +110,8 @@ const fetch = (kind: 'document' | 'field', reference: string) =>
 const check = async (): Promise<void> => {
   const manifest = await loadManifest();
   const entries = Object.entries(manifest.secrets);
+
+  console.log(gray(`\nmanifest: ${await manifestPath()}`));
 
   if (entries.length === 0) {
     console.log(gray('Manifest is empty; nothing to check.'));

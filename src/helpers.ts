@@ -20,6 +20,16 @@ export interface ShellOptions extends Deno.CommandOptions {
    * rather than on screen). Returned `stdout`/`stderr` are empty when set.
    */
   stream?: boolean;
+  /**
+   * Withhold output from the terminal. It is still captured and returned.
+   *
+   * Set this for anything carrying key material. `shell` echoes every chunk as
+   * it drains, so without it a `gpg --export-secret-keys` puts the whole
+   * armored block into the scrollback — and into any log the user saves.
+   *
+   * Takes precedence over `stream`, since inherited output can't be withheld.
+   */
+  secret?: boolean;
 }
 
 /**
@@ -51,12 +61,16 @@ export const wrapText = (text: string, width: number) => {
 export const shell = async (
   command: string,
   args: string[] = [],
-  { error = true, stream = false, ...options }: ShellOptions = {},
+  { error = true, stream = false, secret = false, ...options }: ShellOptions =
+    {},
 ) => {
   const wrap = 80;
   const display = `${command} ${
     args.map((arg) => arg.split('\n')[0]).join(' ')
   }`.trim();
+
+  // `secret` wins: output that's been inherited is already on screen.
+  const captured = !stream || secret;
 
   console.log(
     '\n\n',
@@ -65,10 +79,12 @@ export const shell = async (
     blue('‾'.repeat(wrap)),
   );
 
+  if (secret) console.log(gray(' (output withheld — carries secret material)'));
+
   const process = new Deno.Command(command, {
     args,
-    stdout: stream ? 'inherit' : 'piped',
-    stderr: stream ? 'inherit' : 'piped',
+    stdout: captured ? 'piped' : 'inherit',
+    stderr: captured ? 'piped' : 'inherit',
     ...options,
   });
 
@@ -78,7 +94,7 @@ export const shell = async (
     stderr: new Uint8Array(),
   };
 
-  if (!stream) {
+  if (captured) {
     // Drain both streams concurrently. Draining sequentially deadlocks any
     // command that writes more than a pipe buffer (~64KB) to the stream we
     // aren't reading yet — nix, for instance, sends all of its progress and
@@ -89,7 +105,7 @@ export const shell = async (
       key: 'stdout' | 'stderr',
     ): Promise<void> => {
       for await (const chunk of source) {
-        await sink.write(chunk);
+        if (!secret) await sink.write(chunk);
         chunks[key] = new Uint8Array([...chunks[key], ...chunk]);
       }
     };

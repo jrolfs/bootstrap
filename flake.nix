@@ -56,6 +56,16 @@
 
             export PATH=${runtimePath}
 
+            # `cd` below throws away the directory the user ran from, which is
+            # the only way to find their checkout — the store copy of `src/` has
+            # no path back to it. src/manifest.ts walks up from here.
+            export BOOTSTRAP_INVOCATION_DIR="$PWD"
+
+            # Read-only fallback for `nix run github:…#secrets`, where there is
+            # no checkout at all: mutating commands still refuse it, but the
+            # `gpg import` read path works with nothing cloned.
+            export SECRETS_MANIFEST_STORE=${./secrets.json}
+
             cd ${./src}
 
             exec ${pkgs.deno}/bin/deno run \
@@ -75,9 +85,9 @@
         #
         # and runnable with no checkout at all via
         # `nix run github:jrolfs/bootstrap#secrets`, which is what breaks the
-        # chicken-and-egg during migration. Note mutating subcommands need a
-        # writable checkout (`nix run .#secrets`) since the manifest ships in
-        # the store copy.
+        # chicken-and-egg during migration. Reads work there off the store copy
+        # of the manifest; mutating subcommands need `nix run .#secrets` from a
+        # clone, since only a working tree can be written back to git.
         secrets = entry {
           name = "secrets";
           module = "secrets.ts";

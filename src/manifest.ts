@@ -1,6 +1,8 @@
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
+import { dirname, resolve } from 'https://deno.land/std@0.192.0/path/mod.ts';
 
 import { environment } from './configuration.ts';
+import { pathExists } from './helpers.ts';
 
 /**
  * Manifest of 1Password secret references.
@@ -53,20 +55,78 @@ export type SecretEntry = z.infer<typeof secretEntrySchema>;
 export type Manifest = z.infer<typeof manifestSchema>;
 
 /**
- * Manifest location.
- *
- * Lives in this repo rather than the nix config so the CLI and the bootstrap
- * phases that consume it stay in one place, and so `nix run
- * github:jrolfs/bootstrap#secrets` works with no checkout at all.
+ * Marks a directory as a checkout of this repo. Both are required: `flake.nix`
+ * alone matches any flake the CLI happens to be invoked from.
  */
-const manifestPath = (): string =>
-  new URL('../secrets.json', import.meta.url).pathname;
+const CHECKOUT_MARKERS = ['flake.nix', 'src/secrets.ts'] as const;
+
+/**
+ * Nearest enclosing checkout of this repo, or null.
+ *
+ * Walks up from the directory the CLI was *invoked* from — never from
+ * `import.meta.url`. The flake wrapper `cd`s into the store copy of `src/`
+ * before exec'ing deno, so a module-relative path resolves to a bare
+ * `/nix/store/secrets.json` that exists under no circumstances, and it does so
+ * for `nix run .#secrets` in a clone exactly as much as for
+ * `nix run github:…`. The wrapper exports the pre-`cd` directory as
+ * `BOOTSTRAP_INVOCATION_DIR` so this can recover it.
+ */
+const findCheckout = async (): Promise<string | null> => {
+  const start = Deno.env.get('BOOTSTRAP_INVOCATION_DIR') ?? Deno.cwd();
+
+  const walk = async (directory: string): Promise<string | null> => {
+    const markers = await Promise.all(
+      CHECKOUT_MARKERS.map((marker) => pathExists(`${directory}/${marker}`)),
+    );
+
+    if (markers.every(Boolean)) return directory;
+
+    const parent = dirname(directory);
+
+    return parent === directory ? null : await walk(parent);
+  };
+
+  return await walk(resolve(start));
+};
+
+interface ManifestLocation {
+  readonly path: string;
+  /** False for the store copy, which mutating commands must refuse. */
+  readonly writable: boolean;
+}
+
+/**
+ * Where the manifest lives for this invocation.
+ *
+ * A checkout wins, so `nix run .#secrets` writes to the working tree. Failing
+ * that the flake-baked store copy is used, which lets a checkout-less
+ * `nix run github:jrolfs/bootstrap#secrets` still *read* the committed manifest
+ * — the case the `gpg-imported` bootstrap phase depends on.
+ */
+const manifestLocation = async (): Promise<ManifestLocation> => {
+  const override = Deno.env.get('SECRETS_MANIFEST');
+  if (override) return { path: override, writable: true };
+
+  const checkout = await findCheckout();
+  if (checkout) return { path: `${checkout}/secrets.json`, writable: true };
+
+  const store = Deno.env.get('SECRETS_MANIFEST_STORE');
+  if (store) return { path: store, writable: false };
+
+  return { path: resolve(Deno.cwd(), 'secrets.json'), writable: true };
+};
+
+/** The resolved manifest path, for diagnostics. */
+export const manifestPath = async (): Promise<string> =>
+  (await manifestLocation()).path;
 
 const emptyManifest = (): Manifest => ({ version: 1, secrets: {} });
 
 export const loadManifest = async (): Promise<Manifest> => {
+  const { path } = await manifestLocation();
+
   try {
-    const raw = await Deno.readTextFile(manifestPath());
+    const raw = await Deno.readTextFile(path);
     return manifestSchema.parse(JSON.parse(raw));
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return emptyManifest();
@@ -77,28 +137,23 @@ export const loadManifest = async (): Promise<Manifest> => {
 /**
  * Writes the manifest back.
  *
- * Only works against a writable checkout — when the CLI runs from the nix store
- * (`nix run github:…`) the path is read-only, so mutating commands must be run
- * from a clone. The error surfaces that rather than failing cryptically.
+ * Needs a writable checkout: the store copy can't be edited, so mutating
+ * commands run from a clone. The error names the resolved path because the
+ * failure mode it replaces was silent about which file it meant.
  */
 export const saveManifest = async (manifest: Manifest): Promise<void> => {
-  const path = manifestPath();
+  const { path, writable } = await manifestLocation();
 
-  try {
-    await Deno.writeTextFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
-  } catch (error) {
-    if (
-      error instanceof Deno.errors.PermissionDenied ||
-      path.startsWith('/nix/store/')
-    ) {
-      throw new Error(
-        `Cannot write the manifest at ${path} — it is read-only.\n` +
-          'Mutating commands need a writable checkout: clone the bootstrap ' +
-          'repo and run `nix run .#secrets -- …` from there.',
-      );
-    }
-    throw error;
+  if (!writable) {
+    throw new Error(
+      `Cannot write the manifest: ${path} is in the nix store.\n` +
+        'Mutating commands need a writable checkout — run `nix run .#secrets ' +
+        '-- …` from a clone of this repo, or point SECRETS_MANIFEST at the ' +
+        'file directly.',
+    );
   }
+
+  await Deno.writeTextFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
 };
 
 /** True when `entry` applies to this machine. */

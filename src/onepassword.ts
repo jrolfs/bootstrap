@@ -255,6 +255,7 @@ const opRead = async (
 ): Promise<{ success: true; value: string } | { success: false; stderr: string }> => {
   const result = await shell(await requireOp(), ['read', reference], {
     error: false,
+    secret: true,
   });
   if (result.success) {
     return { success: true, value: result.stdout.trim() };
@@ -322,7 +323,7 @@ export const readDocument = async (
   };
 
   const attempt = async () =>
-    await shell(await requireOp(), args(), { error: false });
+    await shell(await requireOp(), args(), { error: false, secret: true });
 
   const first = await attempt();
   if (first.success) return first.stdout;
