@@ -12,6 +12,7 @@ import {
   restoreMackup,
   waitForResilioSync,
 } from './resilio.ts';
+import { materializeSecrets } from './secrets.ts';
 import { hasPhase, loadState, recordPhase, runPhase } from './state.ts';
 import type { State } from './schemas.ts';
 
@@ -310,6 +311,24 @@ export const bootstrap = async (): Promise<void> => {
     // The rebuild itself may rely on mackup-restored prefs; first switch should
     // not run blind. No-op if Resilio is disabled.
     await waitForResilioSync();
+
+    // Before the switch: `brew bundle` runs inside activation and clones the
+    // private meterup tap, which needs ~/.git-credentials already on disk.
+    // Darwin-only for the same reason the `op` phases are — nothing installs
+    // `op` on Linux yet, and there are no Linux targets in the manifest.
+    state = await runPhase(
+      state,
+      'secrets-materialized',
+      'Manifest secrets written to disk',
+      async () => {
+        if (!isDarwin()) {
+          console.log('Skipping secret materialization on non-darwin host');
+          return;
+        }
+
+        await materializeSecrets();
+      },
+    );
 
     state = await runPhase(
       state,

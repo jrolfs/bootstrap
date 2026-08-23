@@ -116,7 +116,19 @@ const check = async (): Promise<void> => {
   }
 };
 
-const materialize = async (only: readonly string[]): Promise<void> => {
+/**
+ * Writes every manifest entry that has a `target` to disk, at its recorded
+ * mode.
+ *
+ * Exported because provisioning needs it too: ~/.git-credentials has to exist
+ * before the first switch, since `brew bundle` clones the private meterup tap
+ * during activation, long before home-manager configures git.
+ *
+ * @param only Restrict to these entry names; empty means every applicable one
+ */
+export const materializeSecrets = async (
+  only: readonly string[] = [],
+): Promise<void> => {
   const manifest = await loadManifest();
   const { HOME } = environment();
 
@@ -211,7 +223,7 @@ export const runSecrets = async (
     case 'check':
       return await check();
     case 'materialize':
-      return await materialize(positional.slice(1));
+      return await materializeSecrets(positional.slice(1));
     case 'add':
       return await add(subcommand, {
         reference: parsed['reference'],

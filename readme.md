@@ -39,13 +39,17 @@ BOOTSTRAP_REF=flake-migration bash -c "$(curl -fsSL \
 6. **resilio-configured** (macOS) — installs Resilio Sync, seeds the config
    share (secret via `op`), and guides first-run + adding the `~/Configuration`
    share, then waits for it to sync.
-7. **first switch** — `darwin-rebuild` / `nixos-rebuild switch --flake
+7. **secrets-materialized** (macOS) — writes every manifest entry that has a
+   `target` to disk. Before the switch, because `brew bundle` runs inside
+   activation and clones a private tap over HTTPS using `~/.git-credentials`,
+   long before home-manager configures git.
+8. **first switch** — `darwin-rebuild` / `nixos-rebuild switch --flake
    ~/.config/system#<hostname>` (bootstrapped via `nix run` on the first run).
-8. **gpg-imported** — imports every GPG keyring this host is entitled to from
+9. **gpg-imported** — imports every GPG keyring this host is entitled to from
    1Password, along with its ownertrust (see below). After the switch, since
    that's what installs `gpg` and creates `~/.gnupg`.
-9. **mackup-restored** (macOS) — confirmed `mackup restore` from the synced
-   `~/Configuration/mackup`.
+10. **mackup-restored** (macOS) — confirmed `mackup restore` from the synced
+    `~/Configuration/mackup`.
 
 After the first switch on macOS: grant Full Disk Access to
 `/usr/local/bin/icon-customizer` (System Settings → Privacy & Security).

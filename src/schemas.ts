@@ -151,6 +151,7 @@ export const phaseSchema = z.enum([
   'nix-config-cloned',
   'vscode-sync-cloned',
   'resilio-configured',
+  'secrets-materialized',
   'gpg-imported',
   'first-switch-completed',
   'mackup-restored',
