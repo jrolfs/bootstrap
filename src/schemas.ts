@@ -27,6 +27,10 @@ export const githubKeysResponseSchema = z.array(z.object({
   title: z.string(),
 }));
 
+export const githubUserResponseSchema = z.object({
+  login: z.string(),
+});
+
 const githubSshUrl = z
   .string()
   .regex(/^git@github\.com:.+\/.+\.git$/, 'Must be a valid GitHub SSH URL');
@@ -122,6 +126,17 @@ export const configurationSchema = z.object({
     user: z.string(),
     email: z.string().email(),
     clientId: z.string().min(1),
+    /**
+     * Private `owner/repo` slugs the HTTPS credential must be able to read.
+     *
+     * Probed by `secrets github token` right after capture, because the failure
+     * this credential exists to work around is an *authorization* one: an
+     * organization that restricts third-party OAuth Apps or personal access
+     * tokens answers with a plain 404, indistinguishable from a typo. Better to
+     * see that while the token is still on screen than halfway through an
+     * activation.
+     */
+    credentialProbeRepositories: z.array(z.string()).default([]),
   }),
   homeshick: z.object({
     remote: z.string().url(),

@@ -6,6 +6,14 @@ export const configuration = configurationSchema.parse({
     user: 'jrolfs',
     email: 'jamie.rolfs@gmail.com',
     clientId: 'Ov23littWGoGtwfc0yEv',
+    // Both are cloned by `brew bundle` during the first activation — the
+    // private tap itself, and the repo its `--HEAD` formulae build from — long
+    // before home-manager configures git. They're the reason the HTTPS
+    // credential exists, so they're what's worth probing.
+    credentialProbeRepositories: [
+      'meterup/homebrew-packages',
+      'meterup/api',
+    ],
   },
   homeshick: {
     remote: 'https://github.com/andsens/homeshick.git',

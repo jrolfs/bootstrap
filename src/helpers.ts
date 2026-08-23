@@ -170,6 +170,82 @@ export const copyToClipboard = async (value: string): Promise<boolean> => {
   }
 };
 
+/** Reads one line from stdin, trimmed. Empty string on EOF. */
+const readLine = async (): Promise<string> => {
+  const buffer = new Uint8Array(1024);
+  const read = await Deno.stdin.read(buffer);
+  if (read === null) return '';
+
+  return decoder.decode(buffer.subarray(0, read)).trim();
+};
+
+/**
+ * Reads a single line of trimmed input from stdin.
+ *
+ * @param promptText Text to print before reading
+ *
+ * @returns Trimmed user input, or empty string on EOF
+ */
+export const promptLine = async (promptText: string): Promise<string> => {
+  await Deno.stdout.write(new TextEncoder().encode(promptText));
+
+  return await readLine();
+};
+
+/**
+ * Reads a line from stdin without echoing it.
+ *
+ * Terminal echo is off for the duration, so a pasted token never lands in the
+ * scrollback — or in a log of the run. Bytes are handled individually because
+ * raw mode delivers them unprocessed: Enter, backspace and Ctrl-C all arrive as
+ * data rather than being interpreted by the terminal driver.
+ *
+ * Falls back to a plain read when stdin isn't a terminal, which is what lets a
+ * value be piped in instead of typed.
+ *
+ * @param promptText Text to print before reading
+ *
+ * @returns Trimmed input
+ * @throws When the user interrupts with Ctrl-C
+ */
+export const promptSecret = async (promptText: string): Promise<string> => {
+  await Deno.stdout.write(new TextEncoder().encode(promptText));
+
+  if (!Deno.stdin.isTerminal()) return await readLine();
+
+  Deno.stdin.setRaw(true);
+
+  try {
+    const chunk = new Uint8Array(1024);
+    const bytes: number[] = [];
+    let complete = false;
+
+    while (!complete) {
+      const read = await Deno.stdin.read(chunk);
+      if (read === null) break;
+
+      for (const byte of chunk.subarray(0, read)) {
+        if (byte === 0x0d || byte === 0x0a) {
+          complete = true;
+          break;
+        }
+        // Raw mode suppresses SIGINT, so Ctrl-C has to be honoured by hand.
+        if (byte === 0x03) throw new Error('Input cancelled');
+        if (byte === 0x7f || byte === 0x08) {
+          bytes.pop();
+          continue;
+        }
+        bytes.push(byte);
+      }
+    }
+
+    return decoder.decode(new Uint8Array(bytes)).trim();
+  } finally {
+    Deno.stdin.setRaw(false);
+    await Deno.stdout.write(new TextEncoder().encode('\n'));
+  }
+};
+
 export const pathExists = async (path: string) => {
   try {
     await Deno.stat(path);

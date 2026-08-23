@@ -2,6 +2,7 @@ import { bold, gray, green, red } from 'https://deno.land/std@0.192.0/fmt/colors
 import { parse } from 'https://deno.land/std@0.192.0/flags/mod.ts';
 
 import { environment } from './configuration.ts';
+import { captureHttpsCredentials } from './github.ts';
 import { exportGpgKeys, importGpgKeys } from './gpg.ts';
 import {
   appliesToHost,
@@ -35,13 +36,14 @@ export const SECRETS_USAGE =
                                       record an existing item's reference
   … gpg export [<keyring>]            capture a keyring -> 1Password (default: first)
   … gpg import                        import every keyring for this host
+  … github token [--user <login>]     capture a GitHub PAT as the HTTPS credential
 
   add options: --target <path-relative-to-$HOME> --mode <0600>
                --hosts <a,b|*> --kind <document|field> --description <text>
 
-Mutating commands (add, gpg export) need a writable checkout — run them from a
-clone, not \`nix run github:…\`. \`bootstrap secrets list\` prints which manifest
-resolved; SECRETS_MANIFEST overrides it.`;
+Mutating commands (add, gpg export, github token) need a writable checkout — run
+them from a clone, not \`nix run github:…\`. \`bootstrap secrets list\` prints
+which manifest resolved; SECRETS_MANIFEST overrides it.`;
 
 const list = async (): Promise<void> => {
   const manifest = await loadManifest();
@@ -212,7 +214,15 @@ export const runSecrets = async (
   // `--mode 0600` would otherwise arrive as the number 600 with the leading
   // zero silently dropped.
   const parsed = parse([...argv], {
-    string: ['reference', 'kind', 'description', 'target', 'mode', 'hosts'],
+    string: [
+      'reference',
+      'kind',
+      'description',
+      'target',
+      'mode',
+      'hosts',
+      'user',
+    ],
   });
   const positional = parsed._.map(String);
   const [command, subcommand] = positional;
@@ -240,6 +250,11 @@ export const runSecrets = async (
         return;
       }
       throw new Error(`Unknown gpg subcommand: ${subcommand ?? '(none)'}`);
+    case 'github':
+      if (subcommand === 'token') {
+        return await captureHttpsCredentials({ user: parsed['user'] });
+      }
+      throw new Error(`Unknown github subcommand: ${subcommand ?? '(none)'}`);
     case undefined:
     case 'help':
     case '--help':

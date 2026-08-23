@@ -6,7 +6,7 @@ import {
 } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 import { configuration } from './configuration.ts';
-import { pathExists, shell } from './helpers.ts';
+import { pathExists, promptLine, shell } from './helpers.ts';
 import { bin, findBrewBinary, requireBrewBinary } from './system.ts';
 
 // Current 1Password 8 installs as `1Password.app`; earlier 8.x releases used
@@ -126,24 +126,6 @@ const isOpAuthenticated = async (): Promise<boolean> => {
   });
 
   return result.success;
-};
-
-/**
- * Reads a single line of trimmed input from stdin. Used for interactive
- * signin prompts.
- *
- * @param promptText Text to print before reading
- *
- * @returns Trimmed user input, or empty string on EOF
- */
-const promptLine = async (promptText: string): Promise<string> => {
-  await Deno.stdout.write(new TextEncoder().encode(promptText));
-
-  const buffer = new Uint8Array(1024);
-  const read = await Deno.stdin.read(buffer);
-  if (read === null) return '';
-
-  return new TextDecoder().decode(buffer.subarray(0, read)).trim();
 };
 
 /**
@@ -425,6 +407,82 @@ export const readDocument = async (
   );
 };
 
+/**
+ * Vault the `secrets` CLI writes into.
+ *
+ * `secretsVault` first so machine secrets land in the dedicated vault, falling
+ * back to the read-side default for an account that only has one.
+ *
+ * @param override Explicit vault from the caller
+ */
+const writeVault = (override?: string): string => {
+  const vault = override ?? configuration.onePassword?.secretsVault ??
+    configuration.onePassword?.vault;
+
+  if (!vault) {
+    throw new Error(
+      'No vault configured for item creation: set ' +
+        '`onePassword.secretsVault`.',
+    );
+  }
+
+  return vault;
+};
+
+/** True when an item with this title already exists in the vault. */
+const itemExists = async (
+  op: string,
+  title: string,
+  vault: string,
+): Promise<boolean> => {
+  const result = await shell(
+    op,
+    ['item', 'get', title, '--vault', vault, ...opFlags()],
+    { error: false },
+  );
+
+  return result.success;
+};
+
+/**
+ * Runs `op` with `input` on stdin and returns its stdout.
+ *
+ * Deliberately not `shell`: the input is secret material, so it goes down a
+ * pipe rather than through argv, and none of it is logged. 1Password's own
+ * guidance is the same — assignment statements are visible to other processes,
+ * JSON templates on stdin are not.
+ *
+ * @param args Arguments to `op`
+ * @param input Payload for stdin
+ * @param description What failed, for the error message
+ */
+const pipeToOp = async (
+  args: readonly string[],
+  input: string,
+  description: string,
+): Promise<string> => {
+  const child = new Deno.Command(await requireOp(), {
+    args: [...args],
+    stdin: 'piped',
+    stdout: 'piped',
+    stderr: 'piped',
+  }).spawn();
+
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(input));
+  await writer.close();
+
+  const { success, stdout, stderr } = await child.output();
+
+  if (!success) {
+    throw new Error(
+      `${description} failed:\n${new TextDecoder().decode(stderr)}`,
+    );
+  }
+
+  return new TextDecoder().decode(stdout);
+};
+
 interface CreateDocumentOptions {
   readonly title: string;
   readonly fileName: string;
@@ -448,25 +506,11 @@ export const createDocument = async (
   options: CreateDocumentOptions,
 ): Promise<string> => {
   const { title, fileName, contents } = options;
-  const vault = options.vault ?? configuration.onePassword?.secretsVault ??
-    configuration.onePassword?.vault;
+  const vault = writeVault(options.vault);
 
-  if (!vault) {
-    throw new Error(
-      'No vault configured for document creation: set ' +
-        '`onePassword.secretsVault`.',
-    );
-  }
+  const exists = await itemExists(await requireOp(), title, vault);
 
-  const op = await requireOp();
-
-  const exists = await shell(
-    op,
-    ['item', 'get', title, '--vault', vault, ...opFlags()],
-    { error: false },
-  );
-
-  const args = exists.success
+  const args = exists
     ? [
       'document',
       'edit',
@@ -491,25 +535,141 @@ export const createDocument = async (
       ...opFlags(),
     ];
 
-  const child = new Deno.Command(op, {
+  await pipeToOp(
     args,
-    stdin: 'piped',
-    stdout: 'piped',
-    stderr: 'piped',
-  }).spawn();
+    contents,
+    `\`op document ${exists ? 'edit' : 'create'}\` for ${title}`,
+  );
 
-  const writer = child.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(contents));
-  await writer.close();
+  return `op://${vault}/${title}`;
+};
 
-  const { success, stderr } = await child.output();
+/** The parts of an `op item get --format json` payload this module touches. */
+interface ItemField {
+  readonly id?: string;
+  readonly label?: string;
+  readonly type?: string;
+  readonly value?: string;
+}
 
-  if (!success) {
+interface Item {
+  readonly fields?: readonly ItemField[];
+  readonly [key: string]: unknown;
+}
+
+/** Sets `field` to `value`, adding it as a concealed field if it's absent. */
+const patchField = (item: Item, field: string, value: string): Item => {
+  const matches = (candidate: ItemField): boolean =>
+    candidate.id?.toLowerCase() === field.toLowerCase() ||
+    candidate.label?.toLowerCase() === field.toLowerCase();
+
+  const fields = item.fields ?? [];
+
+  return {
+    ...item,
+    fields: fields.some(matches)
+      ? fields.map((candidate) =>
+        matches(candidate) ? { ...candidate, value } : candidate
+      )
+      : [...fields, { id: field, label: field, type: 'CONCEALED', value }],
+  };
+};
+
+interface WriteFieldOptions {
+  readonly title: string;
+  /** Field label — the last segment of an `op://Vault/Item/field` reference. */
+  readonly field: string;
+  readonly value: string;
+  /**
+   * 1Password category for a newly created item, in the JSON template's
+   * spelling (`API_CREDENTIAL`, not `API Credential`).
+   */
+  readonly category?: string;
+  /** Item notes. Written on create only, so an update can't clobber edits. */
+  readonly notes?: string;
+  /** Overrides `onePassword.secretsVault`. */
+  readonly vault?: string;
+}
+
+/**
+ * Writes a single concealed field on a 1Password item, creating the item if it
+ * doesn't exist, and returns its `op://Vault/Item/field` reference.
+ *
+ * Both paths go through a JSON template on stdin rather than an `op` assignment
+ * statement (`credential=…`), which would put the secret in argv where any
+ * other process can read it.
+ *
+ * The update path re-reads the whole item with `--reveal` and pipes it back
+ * patched, which is 1Password's documented edit flow. A partial template would
+ * be shorter, but whether unmentioned fields survive it is unspecified, and
+ * losing a field on a credential item is not a nice way to find out.
+ *
+ * @returns The `op://` reference to store in the manifest
+ */
+export const writeItemField = async (
+  options: WriteFieldOptions,
+): Promise<string> => {
+  const { title, field, value, category = 'API_CREDENTIAL', notes } = options;
+  const vault = writeVault(options.vault);
+  const op = await requireOp();
+
+  const reference = `op://${vault}/${title}/${field}`;
+
+  if (!(await itemExists(op, title, vault))) {
+    const template: Item = {
+      title,
+      category,
+      fields: [
+        { id: field, label: field, type: 'CONCEALED', value },
+        ...(notes
+          ? [{
+            id: 'notesPlain',
+            label: 'notesPlain',
+            type: 'STRING',
+            value: notes,
+          }]
+          : []),
+      ],
+    };
+
+    await pipeToOp(
+      ['item', 'create', '-', '--vault', vault, ...opFlags()],
+      JSON.stringify(template),
+      `\`op item create\` for ${title}`,
+    );
+
+    return reference;
+  }
+
+  const current = await shell(
+    op,
+    [
+      'item',
+      'get',
+      title,
+      '--vault',
+      vault,
+      '--format',
+      'json',
+      '--reveal',
+      ...opFlags(),
+    ],
+    { error: false, secret: true },
+  );
+
+  if (!current.success) {
     throw new Error(
-      `\`op document ${exists.success ? 'edit' : 'create'}\` failed for ` +
-        `${title}:\n${new TextDecoder().decode(stderr)}`,
+      `\`op item get\` failed for ${title}:\n${current.stderr}`,
     );
   }
 
-  return `op://${vault}/${title}`;
+  await pipeToOp(
+    ['item', 'edit', title, '--vault', vault, ...opFlags()],
+    JSON.stringify(
+      patchField(JSON.parse(current.stdout) as Item, field, value),
+    ),
+    `\`op item edit\` for ${title}`,
+  );
+
+  return reference;
 };

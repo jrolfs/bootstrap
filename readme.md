@@ -42,7 +42,8 @@ BOOTSTRAP_REF=flake-migration bash -c "$(curl -fsSL \
 7. **secrets-materialized** (macOS) — writes every manifest entry that has a
    `target` to disk. Before the switch, because `brew bundle` runs inside
    activation and clones a private tap over HTTPS using `~/.git-credentials`,
-   long before home-manager configures git.
+   long before home-manager configures git. That credential is captured once
+   with `bootstrap secrets github token` (see below).
 8. **first switch** — `darwin-rebuild` / `nixos-rebuild switch --flake
    ~/.config/system#<hostname>` (bootstrapped via `nix run` on the first run).
 9. **gpg-imported** — imports every GPG keyring this host is entitled to from
@@ -66,8 +67,18 @@ bootstrap secrets list       # what's in the manifest, and which apply here
 bootstrap secrets check      # verify every op:// reference resolves
 bootstrap secrets materialize
 bootstrap secrets gpg import
+bootstrap secrets github token   # capture a PAT as the HTTPS credential
 bootstrap help
 ```
+
+`secrets github token` covers the one secret that can't be minted
+automatically: GitHub has no API for issuing a personal access token, so it has
+to be created in a browser. The command opens the right page, takes the token on
+a hidden prompt, checks it against the API (including read access to the private
+repositories `brew bundle` clones during activation), stores it in 1Password as
+a complete git-credential-store line, and records the manifest entry — so the
+item, the `op://` reference, and `~/.git-credentials` can't drift apart. Nothing
+is written to disk and nothing appears in argv: stdin to here, stdin to `op`.
 
 Everything is a subcommand of one binary rather than several binaries, so
 nothing generically named lands on `PATH` — `gpg` exists only as `bootstrap
