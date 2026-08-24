@@ -1,3 +1,4 @@
+import { yellow } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 
 import { configuration, environment, setHostname } from './configuration.ts';
@@ -14,6 +15,7 @@ import {
 } from './resilio.ts';
 import { materializeSecrets } from './secrets.ts';
 import { hasPhase, loadState, recordPhase, runPhase } from './state.ts';
+import { findBrewBinary } from './system.ts';
 import type { State } from './schemas.ts';
 
 const NIX_CONFIG_DIR_REL = '.config/system';
@@ -167,12 +169,7 @@ const setupHomeshickAndPrivate = async (): Promise<void> => {
     ]);
   }
 
-  const privatePath = `${HOME}/.homesick/repos/private`;
-
-  if (await pathExists(privatePath)) {
-    console.log('✓ private castle already cloned; pulling');
-    await shell('git', ['-C', privatePath, 'pull', '--ff-only']);
-  } else {
+  if (!(await pathExists(privateCastlePath()))) {
     console.log('Cloning private castle...');
     const homeshick = `source ${homeshickPath}/homeshick.sh && homeshick`;
     await shell('bash', [
@@ -181,9 +178,136 @@ const setupHomeshickAndPrivate = async (): Promise<void> => {
     ]);
   }
 
+  await updatePrivateCastle();
+};
+
+const privateCastlePath = (): string =>
+  `${environment().HOME}/.homesick/repos/private`;
+
+/**
+ * Resolves a tool the first switch installs, falling back to Homebrew.
+ *
+ * Needed because the flake wrapper sets PATH to nix store bin directories only
+ * (see src/system.ts), so nothing the *system* provides can be found by name.
+ */
+const findSystemBinary = async (name: string): Promise<string | null> => {
+  const system = `/run/current-system/sw/bin/${name}`;
+
+  return (await pathExists(system)) ? system : await findBrewBinary(name);
+};
+
+/**
+ * Pulls and re-links the private castle.
+ *
+ * Called outside the `private-cloned` phase gate on purpose: that phase is
+ * recorded after the first successful run, so anything inside it stops
+ * happening — which is how a machine ends up sitting on the castle as it was
+ * the day it was provisioned. Both operations are idempotent and cheap.
+ *
+ * Non-fatal throughout. A castle with local commits fails `--ff-only`, and
+ * that's a thing to resolve by hand, not a reason to abandon the run.
+ */
+const updatePrivateCastle = async (): Promise<void> => {
+  const privatePath = privateCastlePath();
+
+  if (!(await pathExists(privatePath))) return;
+
+  const { success } = await shell(
+    'git',
+    ['-C', privatePath, 'pull', '--ff-only'],
+    { error: false },
+  );
+
+  if (!success) {
+    console.log(
+      yellow(
+        'Could not fast-forward the private castle — resolve it in ' +
+          `${privatePath} by hand.`,
+      ),
+    );
+  }
+
   console.log('Linking private castle...');
-  const homeshick = `source ${homeshickPath}/homeshick.sh && homeshick`;
+  const { HOME } = environment();
+  const homeshick =
+    `source ${HOME}/.homesick/repos/homeshick/homeshick.sh && homeshick`;
   await shell('bash', ['-c', `${homeshick} link --force private`]);
+};
+
+/**
+ * Decrypts the private castle in place with `git-crypt unlock`.
+ *
+ * This is the last link in the chain the castle hangs off:
+ * `.git-crypt/keys/default/0/<fingerprint>.gpg` is git-crypt's symmetric key,
+ * encrypted to the GPG key, so 1Password → GPG secret key → unlock → contents.
+ * Hence its position after `gpg-imported`, which is also after the first switch
+ * that installs `git-crypt` itself.
+ *
+ * Skipping it doesn't merely leave secrets unavailable — every encrypted file
+ * is *ciphertext on disk*, and `.config/zsh/init/keys.zsh` is one of them, so
+ * `.zshrc` sources binary into every shell.
+ *
+ * @returns `false` if the unlock couldn't be completed, leaving the phase
+ *   unrecorded so the next run retries it
+ */
+const unlockPrivateCastle = async (): Promise<boolean> => {
+  const privatePath = privateCastlePath();
+
+  if (!(await pathExists(privatePath))) {
+    console.log('No private castle checkout; nothing to unlock');
+    return false;
+  }
+
+  // git-crypt keeps the decrypted symmetric key here, which makes this the one
+  // reliable "already unlocked" marker — `git-crypt status` reports which paths
+  // *would* be encrypted whether the repo is locked or not.
+  if (await pathExists(`${privatePath}/.git/git-crypt/keys/default`)) {
+    console.log('✓ private castle already unlocked');
+    return true;
+  }
+
+  const gitCrypt = await findSystemBinary('git-crypt');
+  const gpg = await findSystemBinary('gpg');
+
+  if (!gitCrypt || !gpg) {
+    console.log(
+      yellow(
+        `Need both git-crypt and gpg to unlock the castle (git-crypt: ${
+          gitCrypt ?? 'missing'
+        }, gpg: ${gpg ?? 'missing'}); skipping for this run`,
+      ),
+    );
+
+    return false;
+  }
+
+  // Streamed rather than captured so a tty-based pinentry can reach the
+  // terminal — the GPG passphrase prompt happens inside this call. And gpg's
+  // directory is prepended to PATH because git-crypt runs `gpg` by name, which
+  // the wrapper's store-only PATH has no entry for.
+  const { success } = await shell(gitCrypt, ['unlock'], {
+    cwd: privatePath,
+    error: false,
+    stream: true,
+    env: {
+      ...Deno.env.toObject(),
+      PATH: `${gpg.slice(0, gpg.lastIndexOf('/'))}:${Deno.env.get('PATH')}`,
+    },
+  });
+
+  if (success) return true;
+
+  console.log(
+    yellow(
+      'git-crypt unlock failed. It refuses to run on a dirty working tree, ' +
+        'and it needs the secret key for the castle in the default keyring ' +
+        '— check ' +
+        `\`git -C ${privatePath} status\` and \`gpg -K\`, then re-run to retry ` +
+        'this phase.',
+    ),
+  );
+
+  return false;
 };
 
 export const bootstrap = async (): Promise<void> => {
@@ -348,6 +472,16 @@ export const bootstrap = async (): Promise<void> => {
       'gpg-imported',
       'GPG secret key + ownertrust import',
       () => importGpgKeys(),
+    );
+
+    // Straight after the import, because that's what it waits on: the castle's
+    // git-crypt key is encrypted to the GPG key. Until this runs, every
+    // encrypted file in the castle is ciphertext where a real file should be.
+    state = await runPhase(
+      state,
+      'castle-unlocked',
+      'Private castle git-crypt unlock',
+      () => unlockPrivateCastle(),
     );
 
     // mackup restore runs after the switch — mackup is installed by the switch,

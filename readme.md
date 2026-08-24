@@ -35,7 +35,9 @@ BOOTSTRAP_REF=flake-migration bash -c "$(curl -fsSL \
    and authenticates `op` (enable the GUI's CLI integration when prompted).
 5. **clones** — the consolidated nix config → `~/.config/system`, the `private`
    homeshick castle (the only castle still linked), and the VS Code/Cursor
-   settings-sync repo.
+   settings-sync repo. The castle's pull + `homeshick link` run on every
+   invocation, outside the phase gate, so a re-run brings it up to date rather
+   than skipping it as done.
 6. **resilio-configured** (macOS) — installs Resilio Sync, seeds the config
    share (secret via `op`), and guides first-run + adding the `~/Configuration`
    share, then waits for it to sync.
@@ -49,7 +51,12 @@ BOOTSTRAP_REF=flake-migration bash -c "$(curl -fsSL \
 9. **gpg-imported** — imports every GPG keyring this host is entitled to from
    1Password, along with its ownertrust (see below). After the switch, since
    that's what installs `gpg` and creates `~/.gnupg`.
-10. **mackup-restored** (macOS) — confirmed `mackup restore` from the synced
+10. **castle-unlocked** — `git-crypt unlock` on the `private` castle, which the
+    GPG import is a prerequisite for: git-crypt's symmetric key is encrypted to
+    that key. Until it runs, every encrypted path in the castle is ciphertext on
+    disk — `.config/zsh/init/keys.zsh` included, which every shell sources.
+    Retried on the next run if it fails (a dirty castle blocks the unlock).
+11. **mackup-restored** (macOS) — confirmed `mackup restore` from the synced
     `~/Configuration/mackup`.
 
 After the first switch on macOS: grant Full Disk Access to

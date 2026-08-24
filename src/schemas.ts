@@ -168,6 +168,7 @@ export const phaseSchema = z.enum([
   'resilio-configured',
   'secrets-materialized',
   'gpg-imported',
+  'castle-unlocked',
   'first-switch-completed',
   'mackup-restored',
 ]);
