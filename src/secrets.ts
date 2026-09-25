@@ -1,4 +1,9 @@
-import { bold, gray, green, red } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
+import {
+  bold,
+  gray,
+  green,
+  red,
+} from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 import { parse } from 'https://deno.land/std@0.192.0/flags/mod.ts';
 
 import { environment } from './configuration.ts';
@@ -26,8 +31,9 @@ import { readDocument, readSecret } from './onepassword.ts';
  * becoming its own binary precisely so it can't shadow the real `gpg`.
  */
 
-export const SECRETS_USAGE =
-  `${bold('bootstrap secrets')} — 1Password-backed secret manifest
+export const SECRETS_USAGE = `${
+  bold('bootstrap secrets')
+} — 1Password-backed secret manifest
 
   … list                              show entries (● applies to this host)
   … check                             verify every reference resolves
@@ -56,7 +62,9 @@ const list = async (): Promise<void> => {
 
   if (names.length === 0) {
     console.log(
-      gray('Manifest is empty. `bootstrap secrets gpg export` is a good start.'),
+      gray(
+        'Manifest is empty. `bootstrap secrets gpg export` is a good start.',
+      ),
     );
     return;
   }

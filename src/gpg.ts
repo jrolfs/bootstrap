@@ -1,4 +1,9 @@
-import { blue, bold, gray, yellow } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
+import {
+  blue,
+  bold,
+  gray,
+  yellow,
+} from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 import { configuration, environment } from './configuration.ts';
 import { shell } from './helpers.ts';
@@ -262,11 +267,9 @@ const importKeyring = async (
   );
 
   console.log(
-    trusted.success
-      ? `✓ ${keyring.name} ownertrust imported`
-      : yellow(
-        `ownertrust import failed for ${keyring.name}:\n${trusted.stderr}`,
-      ),
+    trusted.success ? `✓ ${keyring.name} ownertrust imported` : yellow(
+      `ownertrust import failed for ${keyring.name}:\n${trusted.stderr}`,
+    ),
   );
 };
 

@@ -5,9 +5,15 @@ import {
   yellow,
 } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
-import { configuration } from './configuration.ts';
-import { pathExists, promptLine, shell } from './helpers.ts';
-import { bin, findBrewBinary, requireBrewBinary } from './system.ts';
+import { configuration, environment } from './configuration.ts';
+import { pathExists, promptLine, promptSecret, shell } from './helpers.ts';
+import {
+  bin,
+  findBrewBinary,
+  findSystemBinary,
+  requireBrewBinary,
+  requireSystemBinary,
+} from './system.ts';
 
 // Current 1Password 8 installs as `1Password.app`; earlier 8.x releases used
 // `1Password 8.app`. Checking only the latter made `guiInstalled` always false,
@@ -18,17 +24,65 @@ const ONEPASSWORD_GUI_APP_CANDIDATES = [
   '/Applications/1Password 8.app',
 ] as const;
 
-/** Resolved path to the installed 1Password desktop app, or null. */
+/**
+ * Resolved path to the installed 1Password desktop app, or null.
+ *
+ * The Linux app is an ordinary executable in the system profile rather than a
+ * bundle, so it is looked up by name after the macOS bundle paths miss.
+ */
 const findGuiApp = async (): Promise<string | null> => {
   for (const candidate of ONEPASSWORD_GUI_APP_CANDIDATES) {
     if (await pathExists(candidate)) return candidate;
   }
-  return null;
+
+  return await findSystemBinary('1password');
 };
 
-// The flake app's PATH excludes the Homebrew prefix, so `op` is never on PATH
-// and `which op` can't find it — resolve it under the brew prefixes instead.
-const requireOp = (): Promise<string> => requireBrewBinary('op');
+// The flake app's PATH excludes both the Homebrew prefix and the NixOS system
+// profile, so `op` is never on PATH and `which op` can't find it — resolve it
+// under one of those instead.
+const requireOp = (): Promise<string> => requireSystemBinary('op');
+
+/**
+ * Where a service-account token is kept, on a host that authenticates with one.
+ *
+ * Deliberately *not* exported into the interactive shell environment. `op`
+ * prefers a token over the desktop app whenever one is set, so a token in the
+ * ambient environment would silently downgrade every interactive `op` call on a
+ * machine that also has a desktop session — and since service accounts cannot
+ * read Personal or Private vaults, references that work by hand would start
+ * failing with nothing to explain why. Reading it per invocation keeps the two
+ * authentication modes from fighting over one shell.
+ */
+const tokenPath = (): string =>
+  `${environment().HOME}/.config/op/service-account-token`;
+
+const readServiceAccountToken = async (): Promise<string | null> => {
+  const fromEnvironment = Deno.env.get('OP_SERVICE_ACCOUNT_TOKEN');
+
+  if (fromEnvironment) return fromEnvironment;
+
+  const path = tokenPath();
+
+  if (!(await pathExists(path))) return null;
+
+  const token = (await Deno.readTextFile(path)).trim();
+
+  return token.length > 0 ? token : null;
+};
+
+/**
+ * Puts the token in *this process's* environment, where every `op` child
+ * inherits it without any call site having to know it exists.
+ *
+ * Scoped to the bootstrap run by design — see `tokenPath`.
+ */
+const useServiceAccountToken = (token: string): void => {
+  Deno.env.set('OP_SERVICE_ACCOUNT_TOKEN', token);
+};
+
+const usingServiceAccount = (): boolean =>
+  Boolean(Deno.env.get('OP_SERVICE_ACCOUNT_TOKEN'));
 
 /**
  * Global flags for `op` *data* commands (read, document get, item get, …).
@@ -37,8 +91,13 @@ const requireOp = (): Promise<string> => requireBrewBinary('op');
  * "multiple accounts found" on a machine signed into both a personal and a work
  * account, and vault names aren't unique across accounts, so the flag makes
  * resolution deterministic rather than dependent on desktop-app state.
+ *
+ * A service-account token identifies exactly one account by construction, and
+ * `op` rejects `--account` alongside one, so the flag drops out in that mode.
  */
 const opFlags = (): readonly string[] => {
+  if (usingServiceAccount()) return [];
+
   const account = configuration.onePassword?.account;
 
   return account ? ['--account', account] : [];
@@ -80,8 +139,19 @@ const inspectInstallation = async (): Promise<OpInstallationStatus> => {
  */
 export const ensureOpInstalled = async (): Promise<void> => {
   if (Deno.build.os !== 'darwin') {
-    console.log('Skipping 1Password install on non-darwin host');
-    return;
+    // Nothing to install: on NixOS both the CLI and the desktop app are
+    // declared in the system configuration, so they arrive with the switch
+    // that the install itself performed. Their absence is a configuration bug
+    // rather than something to fix by running an installer here.
+    if (await findSystemBinary('op')) {
+      console.log('✓ 1Password CLI present (from the system configuration)');
+      return;
+    }
+
+    throw new Error(
+      '`op` is not in the system profile — add `_1password-cli` to the ' +
+        "host's packages and switch, then re-run.",
+    );
   }
 
   const { cliInstalled, guiInstalled } = await inspectInstallation();
@@ -118,7 +188,7 @@ export const ensureOpInstalled = async (): Promise<void> => {
  * need: not a session in the abstract, but authorized reads.
  */
 const isOpAuthenticated = async (): Promise<boolean> => {
-  const op = await findBrewBinary('op');
+  const op = await findSystemBinary('op');
   if (!op) return false;
 
   const result = await shell(op, ['vault', 'list', ...opFlags()], {
@@ -161,6 +231,61 @@ const guideGuiIntegration = async (): Promise<void> => {
 };
 
 /**
+ * Prompts for a service-account token, verifies it, and stores it `0600`.
+ *
+ * The token is the one credential that can't come from the manifest, for the
+ * obvious reason: it is what makes reading the manifest possible. So it's typed
+ * once per host, and `promptSecret` keeps it out of the scrollback.
+ *
+ * Create it on an already-authenticated machine with `op service-account
+ * create`, granting read access to the vault the manifest references — and keep
+ * a copy in 1Password, because the token is displayed exactly once. Note that
+ * service accounts cannot be granted access to Personal or Private vaults at
+ * all, so every reference a host resolves this way has to live in a shared
+ * vault.
+ */
+const authenticateWithServiceAccount = async (): Promise<void> => {
+  console.log('');
+  console.log(
+    'No 1Password desktop app on this host, so `op` authenticates with a ' +
+      'service account.',
+  );
+  console.log(
+    gray(
+      'Create one on a machine that is already signed in:\n' +
+        '  op service-account create irulan --vault Secrets:read_items',
+    ),
+  );
+  console.log('');
+
+  const token = (await promptSecret('Service account token: ')).trim();
+
+  if (!token) throw new Error('no token entered');
+
+  useServiceAccountToken(token);
+
+  if (!(await isOpAuthenticated())) {
+    Deno.env.delete('OP_SERVICE_ACCOUNT_TOKEN');
+
+    throw new Error(
+      "that token can't read from the account — check it was copied whole, " +
+        'and that the service account has access to the vault the manifest ' +
+        'references.',
+    );
+  }
+
+  const path = tokenPath();
+
+  await Deno.mkdir(path.replace(/\/[^/]+$/, ''), { recursive: true });
+  await Deno.writeTextFile(path, `${token}\n`, { mode: 0o600 });
+  // writeTextFile's mode is ignored when the file already exists, so set it
+  // explicitly rather than trusting a first-run-only guarantee.
+  await Deno.chmod(path, 0o600);
+
+  console.log(`✓ 1Password CLI authenticated via service account (${path})`);
+};
+
+/**
  * Ensures `op` can read from the account via the 1Password desktop app's CLI
  * integration. No passwords or session tokens are involved. Whenever the app
  * is installed `op` defers to it, so this is the path that actually works —
@@ -172,29 +297,35 @@ const guideGuiIntegration = async (): Promise<void> => {
  * There's no way to detect that the "Integrate with 1Password CLI" toggle is
  * enabled short of asking `op` for data, so we guide, then probe.
  *
- * A *truly* headless host (no desktop session at all) should use a 1Password
- * service account via `OP_SERVICE_ACCOUNT_TOKEN` rather than interactive
- * signin. An earlier `op account add` + `op signin` fallback lived here, but
- * it's unreachable wherever the app is installed and is the wrong mechanism
- * for automation, so it was removed.
+ * A *truly* headless host (no desktop session at all) uses a 1Password service
+ * account instead, which is the branch below: the app can't delegate a session
+ * when there is no session, and irulan has to come back from a power cut
+ * without anyone at the keyboard. An earlier `op account add` + `op signin`
+ * fallback lived here, but it's unreachable wherever the app is installed and
+ * is the wrong mechanism for automation, so it was removed.
+ *
+ * The two modes coexist on one host rather than being a property of the
+ * platform. A machine that is a desktop *and* a server — as irulan is — uses
+ * the app when someone is logged in and the token when nobody is, and the only
+ * thing that decides which is whether a token is present.
  */
 export const ensureOpAuthenticated = async (): Promise<void> => {
-  if (Deno.build.os !== 'darwin') {
-    // Linux NUC has no compelling op use case yet; gate aggressively until
-    // there is one. See `bootstrap.ts` for the phase-level gate.
-    return;
-  }
+  const existingToken = await readServiceAccountToken();
+
+  if (existingToken) useServiceAccountToken(existingToken);
 
   if (await isOpAuthenticated()) {
-    console.log('✓ 1Password CLI already authenticated');
+    console.log(
+      usingServiceAccount()
+        ? '✓ 1Password CLI authenticated via service account'
+        : '✓ 1Password CLI already authenticated',
+    );
     return;
   }
 
   if (!(await findGuiApp())) {
-    throw new Error(
-      'The 1Password desktop app is not installed, so CLI integration is ' +
-        'unavailable. Install it (the op-installed phase does this) and re-run.',
-    );
+    await authenticateWithServiceAccount();
+    return;
   }
 
   // Retry the guided flow a few times — the user may need a couple of passes
@@ -269,8 +400,14 @@ const normalizeReference = (reference: string): string => {
  */
 const opRead = async (
   reference: string,
-): Promise<{ success: true; value: string } | { success: false; stderr: string }> => {
-  const result = await shell(await requireOp(), ['read', reference, ...opFlags()], {
+): Promise<
+  { success: true; value: string } | { success: false; stderr: string }
+> => {
+  const result = await shell(await requireOp(), [
+    'read',
+    reference,
+    ...opFlags(),
+  ], {
     error: false,
     secret: true,
   });

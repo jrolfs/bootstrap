@@ -144,7 +144,7 @@ export const configureResilio = async (): Promise<void> => {
         ' machine to your existing identity rather than creating a new one:\n' +
         '\n' +
         linkStep +
-        '   2. Once linked, the identity\'s shares appear automatically —\n' +
+        "   2. Once linked, the identity's shares appear automatically —\n" +
         `      including the one that syncs ${sharePath}.\n`,
     ),
   );
@@ -205,7 +205,9 @@ export const restoreMackup = async (): Promise<void> => {
   const mackupDir = `${sharePath}/mackup`;
 
   if (!(await pathExists(mackupDir))) {
-    console.log(`No ${mackupDir} yet; skipping mackup restore (run \`mkrs\` later)`);
+    console.log(
+      `No ${mackupDir} yet; skipping mackup restore (run \`mkrs\` later)`,
+    );
     return;
   }
 
