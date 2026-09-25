@@ -6,6 +6,7 @@ import {
 } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 import { bootstrap } from './bootstrap.ts';
+import { writeInstallerMedia } from './media.ts';
 import { runSecrets, SECRETS_USAGE } from './secrets.ts';
 
 /**
@@ -26,6 +27,7 @@ import { runSecrets, SECRETS_USAGE } from './secrets.ts';
 const USAGE = `${bold('bootstrap')} — machine provisioning and secrets
 
   bootstrap provision                 run every provisioning phase
+  bootstrap media write <iso>         write installer media to a removable disk
   bootstrap secrets <command>         manage the 1Password-backed manifest
   bootstrap help                      this message
 
@@ -34,6 +36,16 @@ ${gray('provision after a failure resumes rather than starting over.')}
 
 ${SECRETS_USAGE}`;
 
+const runMedia = async (args: readonly string[]): Promise<void> => {
+  const [command, image] = args;
+
+  if (command !== 'write' || !image) {
+    throw new Error('Usage: bootstrap media write <iso>');
+  }
+
+  await writeInstallerMedia(image);
+};
+
 const main = async (): Promise<void> => {
   const [command, ...rest] = Deno.args;
 
@@ -41,6 +53,8 @@ const main = async (): Promise<void> => {
     switch (command) {
       case 'provision':
         return await bootstrap();
+      case 'media':
+        return await runMedia(rest);
       case 'secrets':
         return await runSecrets(rest);
       case undefined:
