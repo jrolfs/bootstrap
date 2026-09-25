@@ -7,6 +7,7 @@ import { pathExists, shell } from './helpers.ts';
 import { importGpgKeys } from './gpg.ts';
 import { ensureHostname } from './hostname.ts';
 import { ensureSystemRebuild } from './nix.ts';
+import { installSystem, isNixosInstaller, partitionDisks } from './nixos.ts';
 import { ensureOpAuthenticated, ensureOpInstalled } from './onepassword.ts';
 import {
   configureResilio,
@@ -15,7 +16,7 @@ import {
 } from './resilio.ts';
 import { materializeSecrets } from './secrets.ts';
 import { hasPhase, loadState, recordPhase, runPhase } from './state.ts';
-import { findBrewBinary } from './system.ts';
+import { findSystemBinary } from './system.ts';
 import type { State } from './schemas.ts';
 
 const NIX_CONFIG_DIR_REL = '.config/system';
@@ -185,18 +186,6 @@ const privateCastlePath = (): string =>
   `${environment().HOME}/.homesick/repos/private`;
 
 /**
- * Resolves a tool the first switch installs, falling back to Homebrew.
- *
- * Needed because the flake wrapper sets PATH to nix store bin directories only
- * (see src/system.ts), so nothing the *system* provides can be found by name.
- */
-const findSystemBinary = async (name: string): Promise<string | null> => {
-  const system = `/run/current-system/sw/bin/${name}`;
-
-  return (await pathExists(system)) ? system : await findBrewBinary(name);
-};
-
-/**
  * Pulls and re-links the private castle.
  *
  * Called outside the `private-cloned` phase gate on purpose: that phase is
@@ -331,6 +320,41 @@ export const bootstrap = async (): Promise<void> => {
       state = await recordPhase(state, 'hostname-set');
     }
 
+    // On installer media the job is to put a system on the disk and stop.
+    // Every phase below this needs a user account, a home directory and a
+    // configured system, none of which exist yet — and the installer's
+    // filesystem is a tmpfs that the reboot discards, so there is nothing to
+    // be gained by doing user-level work here and losing it.
+    if (await isNixosInstaller()) {
+      const hostname = state.hostname ?? Deno.hostname();
+
+      state = await runPhase(
+        state,
+        'disk-partitioned',
+        `Disks partitioned for ${hostname} (destroys the configured device)`,
+        async () => {
+          await partitionDisks(hostname);
+        },
+      );
+
+      state = await runPhase(
+        state,
+        'system-installed',
+        `NixOS installed for ${hostname}`,
+        async () => {
+          await installSystem(hostname);
+        },
+      );
+
+      console.log('');
+      console.log('✓ NixOS is on the disk. Reboot, remove the installer, and');
+      console.log('  run the same bootstrap command again on the installed');
+      console.log('  system to continue with the user-level phases.');
+      console.log('');
+
+      return;
+    }
+
     // Nix is installed by bootstrap.sh; record that fact so future phases can
     // reason about it. Re-running bootstrap.sh is itself idempotent, so we
     // record this unconditionally on every run.
@@ -365,33 +389,37 @@ export const bootstrap = async (): Promise<void> => {
       },
     );
 
-    state = await runPhase(state, 'homebrew-installed', 'Homebrew', async () => {
-      await ensureHomebrew();
-    });
+    state = await runPhase(
+      state,
+      'homebrew-installed',
+      'Homebrew',
+      async () => {
+        await ensureHomebrew();
+      },
+    );
 
-    // 1Password install + authentication run on darwin only. Linux has no
-    // compelling NUC use case for `op` yet (no Resilio there either); these
-    // phases are skipped via the `isDarwin()` gate. If `op` becomes useful
-    // on Linux later, drop the gate and Linux will pick it up automatically.
-    if (isDarwin()) {
-      state = await runPhase(
-        state,
-        'op-installed',
-        '1Password GUI + CLI install',
-        async () => {
-          await ensureOpInstalled();
-        },
-      );
+    // Both platforms, by different means: Homebrew installs the CLI and the
+    // desktop app on macOS, while on NixOS both come from the system
+    // configuration, and authentication is the desktop app's CLI integration
+    // wherever there's a desktop session and a service-account token where
+    // there isn't. See src/onepassword.ts.
+    state = await runPhase(
+      state,
+      'op-installed',
+      '1Password GUI + CLI install',
+      async () => {
+        await ensureOpInstalled();
+      },
+    );
 
-      state = await runPhase(
-        state,
-        'op-authenticated',
-        '1Password CLI authorized (`op vault list`)',
-        async () => {
-          await ensureOpAuthenticated();
-        },
-      );
-    }
+    state = await runPhase(
+      state,
+      'op-authenticated',
+      '1Password CLI authorized (`op vault list`)',
+      async () => {
+        await ensureOpAuthenticated();
+      },
+    );
 
     await addKnownHosts();
 
@@ -438,18 +466,13 @@ export const bootstrap = async (): Promise<void> => {
 
     // Before the switch: `brew bundle` runs inside activation and clones the
     // private meterup tap, which needs ~/.git-credentials already on disk.
-    // Darwin-only for the same reason the `op` phases are — nothing installs
-    // `op` on Linux yet, and there are no Linux targets in the manifest.
+    // Entries carry their own `hosts` list, so a host that shouldn't receive
+    // one simply isn't listed rather than being gated by platform here.
     state = await runPhase(
       state,
       'secrets-materialized',
       'Manifest secrets written to disk',
       async () => {
-        if (!isDarwin()) {
-          console.log('Skipping secret materialization on non-darwin host');
-          return;
-        }
-
         await materializeSecrets();
       },
     );

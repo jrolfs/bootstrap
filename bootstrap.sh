@@ -4,6 +4,10 @@ set -euo pipefail
 
 BOOTSTRAP_DIR="$HOME/.bootstrap"
 OS="$(uname -s)"
+# NixOS is its own path through this script: /etc/NIXOS is the marker every
+# NixOS image carries.
+IS_NIXOS=0
+[[ -e /etc/NIXOS ]] && IS_NIXOS=1
 # Branch of this repo to run. Defaults to main; override to test an unmerged
 # branch, e.g. BOOTSTRAP_REF=flake-migration during the flake migration.
 BOOTSTRAP_REF="${BOOTSTRAP_REF:-main}"
@@ -61,6 +65,17 @@ function nix_installed() {
 }
 
 function ensure_nix() {
+  # On NixOS the store and the daemon belong to the OS, and whether that's
+  # CppNix or Lix is decided by `nix.package` at switch time — not by an
+  # installer. Installing on top would put a second daemon on /nix, and the
+  # non-Lix branch below would tell a NixOS user to run
+  # `/nix/nix-installer uninstall`, which does not exist there and would read
+  # as an instruction to dismantle their system.
+  if [[ "$IS_NIXOS" == 1 ]]; then
+    echo "✓ NixOS — nix is managed by the system"
+    return 0
+  fi
+
   # Source first so the Lix-vs-other detection below can run `nix`.
   source_nix_profile
 
@@ -94,6 +109,22 @@ function ensure_nix() {
   source_nix_profile
 }
 
+function ensure_git() {
+  command -v git >/dev/null 2>&1 && return 0
+
+  echo "" >&2
+  echo "✗ git is not on PATH." >&2
+  if [[ "$IS_NIXOS" == 1 ]]; then
+    echo "  On NixOS, run this inside \`nix-shell -p git\` — or if this host is" >&2
+    echo "  already running the flake, git comes from environment.systemPackages" >&2
+    echo "  and a missing one means the switch hasn't happened yet." >&2
+  else
+    echo "  Install the Command Line Tools and re-run." >&2
+  fi
+  echo "" >&2
+  exit 1
+}
+
 function ensure_repository() {
   if [[ -d "$BOOTSTRAP_DIR" ]]; then
     echo "Updating bootstrap repository (ref: $BOOTSTRAP_REF)..."
@@ -111,6 +142,12 @@ function ensure_repository() {
 
 ensure_comand_line_tools
 ensure_nix
+ensure_git
 ensure_repository
 
-nix run .#bootstrap
+# Flakes are enabled by the flake itself (nix.settings.experimental-features),
+# but that only takes effect after the first switch — and on a stock NixOS, or
+# a Nix install whose defaults change, `nix run` would fail before getting far
+# enough to fix it. Ask for them explicitly instead of depending on the state
+# of the machine we're here to configure.
+nix run --extra-experimental-features 'nix-command flakes' .#bootstrap

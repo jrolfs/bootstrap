@@ -156,6 +156,11 @@ export const environmentSchema = z.object({
 
 export const phaseSchema = z.enum([
   'hostname-set',
+  // NixOS installer media only (see src/nixos.ts). Gated on the machine being
+  // live installer media rather than on recorded state, so a stale state.json
+  // cannot replay a disk wipe against an installed system.
+  'disk-partitioned',
+  'system-installed',
   'nix-installed',
   'github-authed',
   'ssh-key-uploaded',
