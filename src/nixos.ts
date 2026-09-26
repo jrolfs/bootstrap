@@ -1,5 +1,6 @@
 import { configuration } from './configuration.ts';
 import { pathExists, shell } from './helpers.ts';
+import { requireSystemBinary, sudo } from './system.ts';
 
 /**
  * Installing NixOS onto the machine that is running this bootstrap.
@@ -75,10 +76,10 @@ const systemFlake = (): string => {
  */
 const NIX_FEATURES = ['--extra-experimental-features', 'nix-command flakes'];
 
-const asRoot = (command: string, args: readonly string[]) =>
+const asRoot = async (command: string, args: readonly string[]) =>
   Deno.uid() === 0
     ? { command, args: [...args] }
-    : { command: 'sudo', args: [command, ...args] };
+    : { command: await sudo(), args: [command, ...args] };
 
 /**
  * Partitions, formats and mounts the target disk according to the host's disko
@@ -108,7 +109,7 @@ export const partitionDisks = async (hostname: string): Promise<void> => {
 
   if (!script) throw new Error('disko produced no script to run');
 
-  const { command, args } = asRoot(script, []);
+  const { command, args } = await asRoot(script, []);
 
   await shell(command, args, { stream: true });
 };
@@ -123,15 +124,18 @@ export const partitionDisks = async (hostname: string): Promise<void> => {
 export const installSystem = async (hostname: string): Promise<void> => {
   const flake = systemFlake();
 
-  const { command, args } = asRoot('nixos-install', [
-    '--flake',
-    `${flake}#${hostname}`,
-    '--root',
-    TARGET_ROOT,
-    // The installer's channels are irrelevant to a flake-configured system and
-    // copying them only slows the install down.
-    '--no-channel-copy',
-  ]);
+  const { command, args } = await asRoot(
+    await requireSystemBinary('nixos-install'),
+    [
+      '--flake',
+      `${flake}#${hostname}`,
+      '--root',
+      TARGET_ROOT,
+      // The installer's channels are irrelevant to a flake-configured system and
+      // copying them only slows the install down.
+      '--no-channel-copy',
+    ],
+  );
 
   await shell(command, args, { stream: true });
 };

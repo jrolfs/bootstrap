@@ -1,6 +1,7 @@
 import { bold, red, yellow } from 'https://deno.land/std@0.192.0/fmt/colors.ts';
 
 import { pathExists, promptLine, shell } from './helpers.ts';
+import { bin, findSystemBinary, requireSystemBinary, sudo } from './system.ts';
 
 /**
  * Writing NixOS installer media.
@@ -34,10 +35,10 @@ interface RemovableDevice {
 
 const isDarwin = (): boolean => Deno.build.os === 'darwin';
 
-const asRoot = (command: string, args: readonly string[]) =>
+const asRoot = async (command: string, args: readonly string[]) =>
   Deno.uid() === 0
     ? { command, args: [...args] }
-    : { command: 'sudo', args: [command, ...args] };
+    : { command: await sudo(), args: [command, ...args] };
 
 const gigabytes = (bytes: number): string =>
   `${(bytes / 1000 ** 3).toFixed(1)} GB`;
@@ -52,12 +53,19 @@ const gigabytes = (bytes: number): string =>
  * `plutil` to land as JSON.
  */
 const darwinDevices = async (): Promise<readonly RemovableDevice[]> => {
+  // Absolute paths: the flake wrapper's PATH is nix store bin directories
+  // only, so neither of these macOS system tools is findable by name.
   const listed = await shell('/bin/sh', [
     '-c',
-    'diskutil list -plist external physical | plutil -convert json -o - -',
-  ], { error: false, secret: true });
+    `${bin.diskutil} list -plist external physical ` +
+    `| ${bin.plutil} -convert json -o - -`,
+  ], { error: false, quiet: true });
 
-  if (!listed.success) return [];
+  if (!listed.success) {
+    throw new Error(
+      `could not list disks: ${listed.stderr.trim() || 'diskutil failed'}`,
+    );
+  }
 
   const { AllDisksAndPartitions: disks = [] } = JSON.parse(listed.stdout) as {
     AllDisksAndPartitions?: readonly { DeviceIdentifier: string }[];
@@ -67,8 +75,9 @@ const darwinDevices = async (): Promise<readonly RemovableDevice[]> => {
     disks.map(async ({ DeviceIdentifier: identifier }) => {
       const info = await shell('/bin/sh', [
         '-c',
-        `diskutil info -plist ${identifier} | plutil -convert json -o - -`,
-      ], { error: false, secret: true });
+        `${bin.diskutil} info -plist ${identifier} ` +
+        `| ${bin.plutil} -convert json -o - -`,
+      ], { error: false, quiet: true });
 
       if (!info.success) return null;
 
@@ -111,14 +120,18 @@ const darwinDevices = async (): Promise<readonly RemovableDevice[]> => {
  * on removable media.
  */
 const linuxDevices = async (): Promise<readonly RemovableDevice[]> => {
-  const listed = await shell('lsblk', [
+  const listed = await shell(await requireSystemBinary('lsblk'), [
     '--json',
     '--bytes',
     '-o',
     'PATH,SIZE,TYPE,MODEL,RM,HOTPLUG,TRAN,MOUNTPOINTS',
-  ], { error: false, secret: true });
+  ], { error: false, quiet: true });
 
-  if (!listed.success) return [];
+  if (!listed.success) {
+    throw new Error(
+      `could not list disks: ${listed.stderr.trim() || 'lsblk failed'}`,
+    );
+  }
 
   interface Block {
     readonly path: string;
@@ -156,11 +169,16 @@ const linuxDevices = async (): Promise<readonly RemovableDevice[]> => {
 
 const unmount = async (device: RemovableDevice): Promise<void> => {
   if (isDarwin()) {
-    await shell('diskutil', ['unmountDisk', device.path], { error: false });
+    await shell(bin.diskutil, ['unmountDisk', device.path], { error: false });
     return;
   }
 
-  const { command, args } = asRoot('umount', [`${device.path}*`]);
+  const umount = await findSystemBinary('umount');
+
+  if (!umount) return;
+
+  const { command, args } = await asRoot(umount, [`${device.path}*`]);
+
   await shell('/bin/sh', ['-c', [command, ...args].join(' ')], {
     error: false,
   });
@@ -168,14 +186,18 @@ const unmount = async (device: RemovableDevice): Promise<void> => {
 
 const eject = async (device: RemovableDevice): Promise<void> => {
   if (isDarwin()) {
-    await shell('diskutil', ['eject', device.path], { error: false });
+    await shell(bin.diskutil, ['eject', device.path], { error: false });
     return;
   }
 
+  // sync comes from coreutils, which the flake wrapper does put on PATH.
   await shell('sync', []);
+
   // eject isn't in every Linux install and the write is already flushed; this
   // is a courtesy so the stick can be pulled without a second thought.
-  await shell('eject', [device.path], { error: false });
+  const ejectBinary = await findSystemBinary('eject');
+
+  if (ejectBinary) await shell(ejectBinary, [device.path], { error: false });
 };
 
 /**
@@ -253,18 +275,19 @@ export const writeInstallerMedia = async (image: string): Promise<void> => {
 
   await unmount(device);
 
-  // Block size suffixes differ: BSD dd takes a lowercase `m`, GNU an uppercase
-  // `M`, and each rejects the other. GNU also reports progress on request,
-  // while BSD only does so when sent SIGINFO.
-  const { command, args } = asRoot('dd', [
+  // GNU dd on both platforms, not the BSD one macOS ships: the flake wrapper
+  // puts coreutils on PATH ahead of /bin. That decides the flag spelling —
+  // BSD takes a lowercase `bs=4m` and GNU rejects it as an invalid number —
+  // and it means macOS gets `status=progress` rather than needing SIGINFO.
+  const { command, args } = await asRoot('dd', [
     `if=${image}`,
     `of=${device.writePath}`,
-    ...(isDarwin() ? ['bs=4m'] : ['bs=4M', 'status=progress', 'conv=fsync']),
+    'bs=4M',
+    'status=progress',
+    'conv=fsync',
   ]);
 
-  if (isDarwin()) {
-    console.log(yellow('Writing — press Ctrl-T for progress.'));
-  }
+  console.log(yellow(`Writing ${image} to ${device.path}…`));
 
   await shell(command, args, { stream: true });
 

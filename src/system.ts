@@ -15,9 +15,11 @@ export const bin = {
   sudo: '/usr/bin/sudo',
   scutil: '/usr/sbin/scutil',
   dscacheutil: '/usr/bin/dscacheutil',
+  diskutil: '/usr/sbin/diskutil',
   killall: '/usr/bin/killall',
   open: '/usr/bin/open',
   pbcopy: '/usr/bin/pbcopy',
+  plutil: '/usr/bin/plutil',
 } as const;
 
 const BREW_PREFIXES = ['/opt/homebrew', '/usr/local'] as const;
@@ -89,6 +91,18 @@ export const requireBrewBinary = async (name: string): Promise<string> => {
 
   return found;
 };
+
+/**
+ * Absolute path to `sudo`.
+ *
+ * `bin.sudo` is the macOS location, and it does not exist on NixOS where sudo
+ * comes from the system profile like everything else. A bare `sudo` can't
+ * stand in for either: the flake wrapper's PATH is nix store bin directories
+ * only, so nothing the system provides is findable by name.
+ */
+export const sudo = async (): Promise<string> =>
+  (await firstExisting([bin.sudo, '/run/current-system/sw/bin/sudo'])) ??
+    'sudo';
 
 /** Absolute path to `hostnamectl`, falling back to a bare PATH lookup. */
 export const hostnamectl = async (): Promise<string> =>

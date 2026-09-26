@@ -34,6 +34,16 @@ export interface ShellOptions extends Deno.CommandOptions {
    * Takes precedence over `stream`, since inherited output can't be withheld.
    */
   secret?: boolean;
+  /**
+   * Keep *stdout* off the terminal because it is noise, not because it is
+   * sensitive. Still captured and returned.
+   *
+   * Separate from `secret` so the reason shows at the call site and in what
+   * the user is told: `secret` announces that output was withheld as key
+   * material, and saying that about a machine-readable probe is both untrue
+   * and the kind of claim that stops meaning anything once it's overused.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -65,16 +75,23 @@ export const wrapText = (text: string, width: number) => {
 export const shell = async (
   command: string,
   args: string[] = [],
-  { error = true, stream = false, secret = false, ...options }: ShellOptions =
-    {},
+  {
+    error = true,
+    stream = false,
+    secret = false,
+    quiet = false,
+    ...options
+  }: ShellOptions = {},
 ) => {
   const wrap = 80;
   const display = `${command} ${
     args.map((arg) => arg.split('\n')[0]).join(' ')
   }`.trim();
 
-  // `secret` wins: output that's been inherited is already on screen.
-  const captured = !stream || secret;
+  // Withholding wins over streaming: output that's been inherited is already
+  // on screen.
+  const withheld = secret || quiet;
+  const captured = !stream || withheld;
 
   console.log(
     '\n\n',
@@ -109,7 +126,7 @@ export const shell = async (
       key: 'stdout' | 'stderr',
     ): Promise<void> => {
       for await (const chunk of source) {
-        if (!(secret && key === 'stdout')) await sink.write(chunk);
+        if (!(withheld && key === 'stdout')) await sink.write(chunk);
         chunks[key] = new Uint8Array([...chunks[key], ...chunk]);
       }
     };
