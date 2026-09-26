@@ -46,7 +46,22 @@
         # `cd ${./src}` puts the CWD in the nix store, which is why the rebuild
         # invocation in src/nix.ts sets an explicit cwd: a bare `nix run` with no
         # attribute would otherwise resolve `.` to that store path.
-        bootstrap = pkgs.writeScriptBin "bootstrap" ''
+        # The zsh completion ships with the binary rather than living in the
+        # dotfiles, so the verbs it offers can't drift from the verbs the CLI
+        # accepts — the failure mode of keeping them apart is a completion that
+        # confidently suggests a subcommand that was renamed months ago.
+        # `share/zsh/site-functions` is already on fpath via the nix profile,
+        # so installing the package is the whole install.
+        bootstrap = pkgs.symlinkJoin {
+          name = "bootstrap";
+          paths = [ bootstrapScript ];
+          postBuild = ''
+            mkdir -p $out/share/zsh/site-functions
+            cp ${./completions/_bootstrap} $out/share/zsh/site-functions/_bootstrap
+          '';
+        };
+
+        bootstrapScript = pkgs.writeScriptBin "bootstrap" ''
           #!${pkgs.bash}/bin/bash
           set -e
 

@@ -1,0 +1,84 @@
+#compdef bootstrap
+
+# Completion for the `bootstrap` CLI.
+#
+# Shipped by the package rather than kept in the dotfiles, so it moves in step
+# with the verbs it describes: a subcommand added here and a completion added
+# in another repo drift apart the moment one is updated without the other.
+
+_bootstrap() {
+  local context state state_descr line
+  typeset -A opt_args
+
+  _arguments -C \
+    '1: :->command' \
+    '*:: :->argument'
+
+  case $state in
+    command)
+      local -a commands
+      commands=(
+        'provision:run every provisioning phase'
+        'media:write installer media to a removable disk'
+        'secrets:manage the 1Password-backed manifest'
+        'help:show usage'
+      )
+      _describe -t commands 'bootstrap command' commands
+      ;;
+
+    argument)
+      case $words[1] in
+        media)
+          if (( CURRENT == 2 )); then
+            _describe -t commands 'media command' '(write:write an image to a removable disk)'
+          else
+            # Only the image is completed. The target device is deliberately
+            # not an argument at all — it is chosen from the removable devices
+            # the command enumerates, so no spelling of this reaches an
+            # internal disk.
+            _files -g '*.(iso|img)'
+          fi
+          ;;
+
+        secrets)
+          if (( CURRENT == 2 )); then
+            local -a secrets
+            secrets=(
+              'list:show entries, marking those that apply to this host'
+              'check:verify every reference resolves'
+              'materialize:write entries with a target to disk (0600)'
+              'add:record an existing item'\''s reference'
+              'gpg:export or import a GPG keyring'
+              'github:capture a GitHub PAT as the HTTPS credential'
+            )
+            _describe -t commands 'secrets command' secrets
+            return
+          fi
+
+          case $words[2] in
+            gpg)
+              (( CURRENT == 3 )) && _describe -t commands 'gpg command' \
+                '(export:capture a keyring -> 1Password import:import every keyring for this host)'
+              ;;
+            github)
+              (( CURRENT == 3 )) && _describe -t commands 'github command' \
+                '(token:capture a GitHub PAT as the HTTPS credential)'
+              _arguments '--user[GitHub login]:login:'
+              ;;
+            add)
+              _arguments \
+                '--reference[op:// reference]:reference:' \
+                '--target[path relative to $HOME]:path:' \
+                '--mode[file mode]:mode:(0600 0644)' \
+                '--hosts[hosts this applies to]:hosts:' \
+                '--kind[how to fetch it]:kind:(document field)' \
+                '--description[what this is]:text:'
+              ;;
+          esac
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_bootstrap "$@"
