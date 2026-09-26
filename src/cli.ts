@@ -8,6 +8,7 @@ import {
 import { bootstrap } from './bootstrap.ts';
 import { writeInstallerMedia } from './media.ts';
 import { runSecrets, SECRETS_USAGE } from './secrets.ts';
+import { useSystemPath } from './system.ts';
 
 /**
  * `bootstrap` — the single entry point, for provisioning a machine and for
@@ -47,6 +48,11 @@ const runMedia = async (args: readonly string[]): Promise<void> => {
 };
 
 const main = async (): Promise<void> => {
+  // Before anything shells out. The flake wrapper's PATH is nix store bin
+  // directories only, which is right for the tools we pin and wrong for every
+  // tool the system owns.
+  useSystemPath();
+
   const [command, ...rest] = Deno.args;
 
   try {

@@ -1,15 +1,16 @@
 import { pathExists } from './helpers.ts';
 
 /**
- * Absolute paths to system tools.
+ * Absolute paths to macOS system tools that live at a fixed location.
  *
- * The flake app (`nix run .#bootstrap`) sets PATH to nix store bin dirs only —
- * no /usr/bin, /usr/sbin, /bin, and no Homebrew prefix. Anything not provided
- * by the flake therefore has to be invoked by absolute path, including via
- * `sudo`, which resolves the command against its own restricted PATH.
+ * `useSystemPath` puts these directories on PATH, so most callers can just use
+ * the name. This exists for the ones worth pinning anyway: `sudo` resolves the
+ * command it runs against *its own* restricted PATH rather than ours, so
+ * anything handed to it wants a full path regardless of what we set here.
  *
- * Tools whose location isn't fixed (Homebrew prefix, NixOS system profile)
- * are resolved at runtime by the helpers below rather than listed here.
+ * Anything whose location varies by platform or installation — sudo itself,
+ * Homebrew, the NixOS profile — is resolved at runtime by the helpers below
+ * instead of being listed here.
  */
 export const bin = {
   sudo: '/usr/bin/sudo',
@@ -24,11 +25,57 @@ export const bin = {
 
 const BREW_PREFIXES = ['/opt/homebrew', '/usr/local'] as const;
 
-// NixOS puts systemd tools in the system profile; /usr/bin covers non-NixOS.
-const HOSTNAMECTL_CANDIDATES = [
-  '/run/current-system/sw/bin/hostnamectl',
-  '/usr/bin/hostnamectl',
-] as const;
+/**
+ * Where the *system* keeps its tools, in resolution order.
+ *
+ * The flake wrapper sets PATH to nix store bin directories only, so nothing
+ * here is findable by name unless we put it there. This list is the single
+ * answer to "where does a system tool live", used both to resolve one by name
+ * and to extend PATH so a plain invocation works (see `useSystemPath`).
+ *
+ * Order matters in one place especially: `/run/wrappers/bin` must precede the
+ * NixOS system profile. NixOS installs setuid programs as wrappers there,
+ * while `security/sudo.nix` *also* puts the package in
+ * `environment.systemPackages` — so `/run/current-system/sw/bin/sudo` exists
+ * and is the unwrapped binary, which resolves happily and then cannot elevate.
+ * Finding the wrong one is worse than finding none.
+ */
+const SYSTEM_PATHS: readonly string[] = Deno.build.os === 'darwin'
+  ? [
+    '/usr/bin',
+    '/usr/sbin',
+    '/bin',
+    '/sbin',
+    ...BREW_PREFIXES.map((prefix) => `${prefix}/bin`),
+  ]
+  : [
+    // Setuid wrappers first — see above.
+    '/run/wrappers/bin',
+    '/run/current-system/sw/bin',
+    '/usr/bin',
+    '/bin',
+  ];
+
+/**
+ * Appends the system directories to this process's PATH, so tools we shell out
+ * to can be invoked by name and inherited by children.
+ *
+ * Appended rather than prepended: everything the flake pins still wins, so
+ * this changes which commands *resolve*, never which implementation a resolved
+ * one gets. The alternative — an absolute path per tool — is what this codebase
+ * did, and it grew a new special case every time provisioning met a directory
+ * nobody had listed yet, each discovered as a failure mid-install.
+ */
+export const useSystemPath = (): void => {
+  const current = Deno.env.get('PATH') ?? '';
+  const missing = SYSTEM_PATHS.filter(
+    (directory) => !current.split(':').includes(directory),
+  );
+
+  if (missing.length > 0) {
+    Deno.env.set('PATH', [current, ...missing].filter(Boolean).join(':'));
+  }
+};
 
 const firstExisting = async (
   candidates: readonly string[],
@@ -55,13 +102,8 @@ export const findBrewBinary = (name: string): Promise<string | null> =>
  * different places: `op` is a Homebrew cask on macOS and a nix package on
  * NixOS, and neither location is on the flake app's PATH.
  */
-export const findSystemBinary = async (
-  name: string,
-): Promise<string | null> => {
-  const system = `/run/current-system/sw/bin/${name}`;
-
-  return (await pathExists(system)) ? system : await findBrewBinary(name);
-};
+export const findSystemBinary = (name: string): Promise<string | null> =>
+  firstExisting(SYSTEM_PATHS.map((directory) => `${directory}/${name}`));
 
 /** As `findSystemBinary`, but throws with actionable context when absent. */
 export const requireSystemBinary = async (name: string): Promise<string> => {
@@ -69,9 +111,8 @@ export const requireSystemBinary = async (name: string): Promise<string> => {
 
   if (!found) {
     throw new Error(
-      `\`${name}\` not found in the system profile or under ` +
-        `${BREW_PREFIXES.join(' or ')} — the phase that installs it must run ` +
-        'before this step.',
+      `\`${name}\` not found in ${SYSTEM_PATHS.join(', ')} — the phase that ` +
+        'installs it must run before this step.',
     );
   }
 
@@ -95,15 +136,15 @@ export const requireBrewBinary = async (name: string): Promise<string> => {
 /**
  * Absolute path to `sudo`.
  *
- * `bin.sudo` is the macOS location, and it does not exist on NixOS where sudo
- * comes from the system profile like everything else. A bare `sudo` can't
- * stand in for either: the flake wrapper's PATH is nix store bin directories
- * only, so nothing the system provides is findable by name.
+ * Resolved rather than taken from `bin` because the location differs per
+ * platform, and on NixOS the *wrong* one is present too: the setuid wrapper in
+ * /run/wrappers/bin is the one that can elevate, while the copy in the system
+ * profile is unwrapped and fails after resolving. SYSTEM_PATHS orders the
+ * wrapper directory first for exactly this reason.
  */
 export const sudo = async (): Promise<string> =>
-  (await firstExisting([bin.sudo, '/run/current-system/sw/bin/sudo'])) ??
-    'sudo';
+  (await findSystemBinary('sudo')) ?? 'sudo';
 
 /** Absolute path to `hostnamectl`, falling back to a bare PATH lookup. */
 export const hostnamectl = async (): Promise<string> =>
-  (await firstExisting(HOSTNAMECTL_CANDIDATES)) ?? 'hostnamectl';
+  (await findSystemBinary('hostnamectl')) ?? 'hostnamectl';
