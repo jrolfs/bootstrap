@@ -411,9 +411,22 @@ const opRead = async (
     error: false,
     secret: true,
   });
+  const value = result.stdout.trim();
+
+  // An exit status of 0 with nothing on stdout is not a successful read of an
+  // empty secret — no entry in this manifest is legitimately empty, and
+  // treating the two as the same is how a blank file ends up written and
+  // recorded as done. Reported as a failure so the re-authenticating retry
+  // below gets its chance.
+  if (result.success && value) return { success: true, value };
+
   if (result.success) {
-    return { success: true, value: result.stdout.trim() };
+    return {
+      success: false,
+      stderr: `\`op read ${reference}\` returned nothing`,
+    };
   }
+
   return { success: false, stderr: result.stderr };
 };
 

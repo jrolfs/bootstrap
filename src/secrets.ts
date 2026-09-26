@@ -160,6 +160,19 @@ export const materializeSecrets = async (
     const path = `${HOME}/${entry.target}`;
     const contents = await fetch(entry.kind, entry.reference);
 
+    // Refuse to write an empty secret. Nothing in this manifest is
+    // legitimately blank, and writing one is worse than failing outright: the
+    // file looks present, the phase records as complete, and completed phases
+    // are skipped — so the machine sits permanently on a 0-byte credential
+    // that nothing retries. Throwing leaves the phase unrecorded, which is
+    // what lets the next run have another go.
+    if (!contents.trim()) {
+      throw new Error(
+        `${name} resolved to nothing from ${entry.reference} — refusing to ` +
+          `write an empty ${path}`,
+      );
+    }
+
     await Deno.mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true });
     await Deno.writeTextFile(path, contents);
     await Deno.chmod(path, parseInt(entry.mode, 8));
