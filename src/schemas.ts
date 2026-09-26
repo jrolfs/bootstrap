@@ -142,7 +142,7 @@ export const configurationSchema = z.object({
     remote: z.string().url(),
   }),
   nixConfigRepo: githubSshUrl,
-  nixConfigBranch: z.string().min(1).default('master'),
+  nixConfigBranch: z.string().min(1).default('main'),
   privateCastleRepo: githubSshUrl,
   vscodeSyncRepo: githubSshUrl.optional(),
   onePassword: onePasswordConfigurationSchema.optional(),

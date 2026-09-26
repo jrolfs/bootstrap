@@ -22,9 +22,7 @@ export const configuration = configurationSchema.parse({
   // (GitHub redirects would cover most cases, but a fresh SSH clone wants the
   // real name). Flip to `nix.git` once the rename happens.
   nixConfigRepo: 'git@github.com:jrolfs/macos.git',
-  // Default branch override during the flake migration period.
-  // Flip back to "master" once the migration branch is merged.
-  nixConfigBranch: 'migration-flake',
+  nixConfigBranch: 'main',
   privateCastleRepo: 'git@github.com:jrolfs/private.git',
   vscodeSyncRepo: 'git@github.com:jrolfs/vscode.git',
   onePassword: {

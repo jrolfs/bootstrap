@@ -9,7 +9,7 @@ OS="$(uname -s)"
 IS_NIXOS=0
 [[ -e /etc/NIXOS ]] && IS_NIXOS=1
 # Branch of this repo to run. Defaults to main; override to test an unmerged
-# branch, e.g. BOOTSTRAP_REF=flake-migration during the flake migration.
+# branch, which also means fetching this script from that branch's raw URL.
 BOOTSTRAP_REF="${BOOTSTRAP_REF:-main}"
 
 function ensure_comand_line_tools() {

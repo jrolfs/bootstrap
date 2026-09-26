@@ -15,12 +15,18 @@ skips completed phases, so a failed step can be fixed and resumed.
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/jrolfs/bootstrap/main/bootstrap.sh)"
 ```
 
-`BOOTSTRAP_REF` selects which branch of this repo to run (default `main`). While
-the flake migration is unmerged, run the migration branch:
+On NixOS, run the same command from the installer image: it partitions the
+disk and installs the system, then you reboot and run it again to pick up the
+user-level phases.
+
+`BOOTSTRAP_REF` selects which branch of this repo to run, defaulting to `main`.
+To try an unmerged branch, name it in both places — the URL decides which
+`bootstrap.sh` you fetch, and the variable decides which branch that script
+then checks out:
 
 ```bash
-BOOTSTRAP_REF=flake-migration bash -c "$(curl -fsSL \
-  https://raw.githubusercontent.com/jrolfs/bootstrap/flake-migration/bootstrap.sh)"
+BOOTSTRAP_REF=some-branch bash -c "$(curl -fsSL \
+  https://raw.githubusercontent.com/jrolfs/bootstrap/some-branch/bootstrap.sh)"
 ```
 
 ## What it does
