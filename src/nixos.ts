@@ -97,21 +97,30 @@ const asRoot = async (command: string, args: readonly string[]) =>
 export const partitionDisks = async (hostname: string): Promise<void> => {
   const flake = systemFlake();
 
-  const built = await shell('nix', [
+  // `--out-link` to a path of our choosing, rather than reading one back from
+  // `--print-out-paths`. Under the flake app — whose wrapper leaves the working
+  // directory inside the nix store — that read returned the store copy of this
+  // source tree instead of the built script, and sudo was handed a directory
+  // ("command not found"). Naming the destination removes the parse, and the
+  // explicit cwd keeps nix from resolving anything against a store path.
+  const directory = await Deno.makeTempDir({ prefix: 'disko-' });
+  const script = `${directory}/script`;
+
+  await shell('nix', [
     'build',
     ...NIX_FEATURES,
-    '--no-link',
-    '--print-out-paths',
+    '--out-link',
+    script,
     `${flake}#nixosConfigurations.${hostname}.config.system.build.diskoScript`,
-  ]);
+  ], { cwd: directory });
 
-  const script = built.stdout.trim();
-
-  if (!script) throw new Error('disko produced no script to run');
+  if (!(await pathExists(script))) {
+    throw new Error(`nix did not write a disko script to ${script}`);
+  }
 
   const { command, args } = await asRoot(script, []);
 
-  await shell(command, args, { stream: true });
+  await shell(command, args, { stream: true, cwd: directory });
 };
 
 /**
@@ -137,5 +146,8 @@ export const installSystem = async (hostname: string): Promise<void> => {
     ],
   );
 
-  await shell(command, args, { stream: true });
+  // Out of the store for the same reason as partitionDisks: the wrapper's
+  // working directory is a store path, and nix resolves relative references
+  // against it.
+  await shell(command, args, { stream: true, cwd: TARGET_ROOT });
 };
