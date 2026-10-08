@@ -49,7 +49,18 @@ const applyHostname = async (name: string): Promise<void> => {
     return;
   }
 
-  await shell(elevate, [await hostnamectl(), 'set-hostname', name]);
+  // `--transient` is not an optimisation, it's the only thing that works
+  // here. Without it hostnamectl writes /etc/hostname, which on NixOS is a
+  // read-only symlink into the store — on installer media and on an installed
+  // system alike. Nothing is lost: the hostname is wanted for the rest of this
+  // run, as the flake attribute to select, and `networking.hostName` asserts
+  // it permanently from the first switch onward.
+  await shell(elevate, [
+    await hostnamectl(),
+    '--transient',
+    'set-hostname',
+    name,
+  ]);
 };
 
 /**
