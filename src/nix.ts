@@ -1,6 +1,6 @@
 import { environment } from './configuration.ts';
 import { shell } from './helpers.ts';
-import { bin } from './system.ts';
+import { sudo } from './system.ts';
 
 const NIX_CONFIG_DIR = '.config/system';
 
@@ -67,7 +67,7 @@ export const ensureSystemRebuild = async (): Promise<void> => {
     console.log(`✓ ${tool} on PATH; using installed binary`);
 
     await shell(
-      bin.sudo,
+      await sudo(),
       ['-E', tool, 'switch', '--flake', target, '--show-trace'],
       { cwd, stream: true },
     );
@@ -77,7 +77,7 @@ export const ensureSystemRebuild = async (): Promise<void> => {
   console.log(`Bootstrapping ${REBUILD_FLAKE[os]} via \`nix run\`...`);
 
   await shell(
-    bin.sudo,
+    await sudo(),
     [
       '-E',
       'nix',
