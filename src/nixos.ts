@@ -76,6 +76,39 @@ const systemFlake = (): string => {
  */
 const NIX_FEATURES = ['--extra-experimental-features', 'nix-command flakes'];
 
+/**
+ * The same reference with the branch replaced by the revision it points at
+ * right now, resolved once and reused by every step of the install.
+ *
+ * Partitioning and installing are separate `nix` invocations, and a branch name
+ * is not a fixed input to either: nix caches the branch-to-revision lookup for
+ * `tarball-ttl`, so the two can disagree, and a push between them would have
+ * them install a different commit than the one whose disk layout was applied.
+ * Resolving once collapses both problems, and `--refresh` makes the answer
+ * current rather than up to an hour old.
+ */
+export const resolveSystemFlake = (): Promise<string> =>
+  resolveRevision(systemFlake());
+
+const resolveRevision = async (reference: string): Promise<string> => {
+  const metadata = await shell('nix', [
+    'flake',
+    'metadata',
+    ...NIX_FEATURES,
+    '--refresh',
+    '--json',
+    reference,
+  ], { quiet: true });
+
+  const { revision } = JSON.parse(metadata.stdout) as { revision?: string };
+
+  if (!revision) {
+    throw new Error(`could not resolve a revision for ${reference}`);
+  }
+
+  return reference.replace(/\/[^/]+$/, `/${revision}`);
+};
+
 const asRoot = async (command: string, args: readonly string[]) =>
   Deno.uid() === 0
     ? { command, args: [...args] }
@@ -94,9 +127,10 @@ const asRoot = async (command: string, args: readonly string[]) =>
  * lock file, rather than `nix run github:nix-community/disko`, so the tool that
  * formats the disk is the same one the configuration was written against.
  */
-export const partitionDisks = async (hostname: string): Promise<void> => {
-  const flake = systemFlake();
-
+export const partitionDisks = async (
+  hostname: string,
+  flake: string,
+): Promise<void> => {
   // `--out-link` to a path of our choosing, rather than reading one back from
   // `--print-out-paths`. Under the flake app — whose wrapper leaves the working
   // directory inside the nix store — that read returned the store copy of this
@@ -130,9 +164,10 @@ export const partitionDisks = async (hostname: string): Promise<void> => {
  * behaviour and worth keeping: it is the rescue path if the user account's
  * password (declared in the host configuration) ever fails to let you in.
  */
-export const installSystem = async (hostname: string): Promise<void> => {
-  const flake = systemFlake();
-
+export const installSystem = async (
+  hostname: string,
+  flake: string,
+): Promise<void> => {
   const { command, args } = await asRoot(
     await requireSystemBinary('nixos-install'),
     [

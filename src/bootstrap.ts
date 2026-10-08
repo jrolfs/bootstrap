@@ -7,7 +7,12 @@ import { pathExists, shell } from './helpers.ts';
 import { importGpgKeys } from './gpg.ts';
 import { ensureHostname } from './hostname.ts';
 import { ensureSystemRebuild } from './nix.ts';
-import { installSystem, isNixosInstaller, partitionDisks } from './nixos.ts';
+import {
+  installSystem,
+  isNixosInstaller,
+  partitionDisks,
+  resolveSystemFlake,
+} from './nixos.ts';
 import { ensureOpAuthenticated, ensureOpInstalled } from './onepassword.ts';
 import {
   configureResilio,
@@ -328,12 +333,19 @@ export const bootstrap = async (): Promise<void> => {
     if (await isNixosInstaller()) {
       const hostname = state.hostname ?? Deno.hostname();
 
+      // Resolved once so partitioning and installing cannot land on
+      // different commits, and so neither depends on how stale nix's
+      // branch lookup happens to be.
+      const flake = await resolveSystemFlake();
+
+      console.log(`Installing from ${flake}`);
+
       state = await runPhase(
         state,
         'disk-partitioned',
         `Disks partitioned for ${hostname} (destroys the configured device)`,
         async () => {
-          await partitionDisks(hostname);
+          await partitionDisks(hostname, flake);
         },
       );
 
@@ -342,7 +354,7 @@ export const bootstrap = async (): Promise<void> => {
         'system-installed',
         `NixOS installed for ${hostname}`,
         async () => {
-          await installSystem(hostname);
+          await installSystem(hostname, flake);
         },
       );
 
