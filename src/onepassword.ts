@@ -191,12 +191,8 @@ const isOpAuthenticated = async (): Promise<boolean> => {
   const op = await findSystemBinary('op');
   if (!op) return false;
 
-  // No stdin: on a host with no account configured, `op` answers this by
-  // offering an interactive menu of ways to sign in rather than failing, and a
-  // probe that can stop and wait for input isn't a probe.
   const result = await shell(op, ['vault', 'list', ...opFlags()], {
     error: false,
-    stdin: 'null',
   });
 
   return result.success;
@@ -334,6 +330,16 @@ const authenticateWithServiceAccount = async (): Promise<void> => {
 export const ensureOpAuthenticated = async (): Promise<void> => {
   const existingToken = await readServiceAccountToken();
 
+  // With neither a token nor a desktop session there is nothing `op` could
+  // authenticate with, so don't ask it. Asked anyway, an unconfigured `op`
+  // offers to add an account and reads the answer from /dev/tty, which no
+  // stdin redirection can close off — the run stops on a prompt the user
+  // never needed to see.
+  if (!existingToken && !(await canUseDesktopApp())) {
+    await authenticateWithServiceAccount();
+    return;
+  }
+
   if (existingToken) useServiceAccountToken(existingToken);
 
   if (await isOpAuthenticated()) {
@@ -345,9 +351,11 @@ export const ensureOpAuthenticated = async (): Promise<void> => {
     return;
   }
 
-  if (!(await canUseDesktopApp())) {
-    await authenticateWithServiceAccount();
-    return;
+  if (usingServiceAccount()) {
+    throw new Error(
+      `the saved service account token at ${tokenPath()} can't read from ` +
+        'the account — delete it and re-run to enter a new one',
+    );
   }
 
   // Retry the guided flow a few times — the user may need a couple of passes
