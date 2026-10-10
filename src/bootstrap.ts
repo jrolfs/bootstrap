@@ -27,7 +27,13 @@ import {
   waitForResilioSync,
 } from './resilio.ts';
 import { areSecretsMaterialized, materializeSecrets } from './secrets.ts';
-import { hasPhase, loadState, recordPhase, runPhase } from './state.ts';
+import {
+  hasPhase,
+  loadState,
+  recordPhase,
+  runPhase,
+  unfinishedPhases,
+} from './state.ts';
 import { findSystemBinary } from './system.ts';
 import type { State } from './schemas.ts';
 
@@ -236,6 +242,29 @@ const updatePrivateCastle = async (): Promise<void> => {
 };
 
 /**
+ * Clears zinit's cached copies of ~/.config/zsh/init, so the next shell reads
+ * the files the unlock just decrypted.
+ *
+ * .zshrc loads each init file with `zinit snippet`, which copies a local file
+ * into its cache on first use and keeps sourcing that copy. On a new machine
+ * the first shell opens before the castle is unlocked, so the copy of
+ * keys.zsh it takes is still ciphertext, and every later shell sources
+ * binary until the cache is cleared. zinit re-copies on the next shell.
+ */
+const forgetCachedShellInit = async (): Promise<void> => {
+  const { HOME } = environment();
+  const snippets = `${HOME}/.local/share/zinit/snippets`;
+
+  if (!(await pathExists(snippets))) return;
+
+  for await (const entry of Deno.readDir(snippets)) {
+    if (entry.isDirectory && entry.name.endsWith('--.config--zsh--init')) {
+      await Deno.remove(`${snippets}/${entry.name}`, { recursive: true });
+    }
+  }
+};
+
+/**
  * Decrypts the private castle in place with `git-crypt unlock`.
  *
  * This is the last link in the chain the castle hangs off:
@@ -296,7 +325,10 @@ const unlockPrivateCastle = async (): Promise<boolean> => {
     },
   });
 
-  if (success) return true;
+  if (success) {
+    await forgetCachedShellInit();
+    return true;
+  }
 
   console.log(
     yellow(
@@ -623,6 +655,17 @@ export const bootstrap = async (): Promise<void> => {
         await restoreMackup();
       },
     );
+
+    const remaining = unfinishedPhases();
+
+    if (remaining.length > 0) {
+      console.log(yellow('\nBootstrap finished, with steps left to do:'));
+      remaining.forEach((description) =>
+        console.log(yellow(`  • ${description}`))
+      );
+      console.log(yellow('Fix what each one reported above, then re-run.'));
+      Deno.exit(1);
+    }
 
     console.log('✨ Bootstrap complete!');
   } catch (error) {

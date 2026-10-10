@@ -35,6 +35,14 @@ const writeState = async (state: State): Promise<void> => {
   await Deno.writeTextFile(path, JSON.stringify(state, null, 2));
 };
 
+const unfinished: string[] = [];
+
+/**
+ * Phases this run left undone: their task stepped aside rather than failing,
+ * so the run carried on past them.
+ */
+export const unfinishedPhases = (): readonly string[] => unfinished;
+
 export const hasPhase = (state: State, phase: Phase): boolean =>
   state.phases.includes(phase);
 
@@ -79,7 +87,10 @@ export const runPhase = async (
       return recordPhase(state, phase);
     }
 
-    if ((await task()) === false) return state;
+    if ((await task()) === false) {
+      unfinished.push(description);
+      return state;
+    }
 
     if (!(await check())) {
       throw new Error(
@@ -102,5 +113,10 @@ export const runPhase = async (
   // gets recorded as done and never runs again.
   const completed = await task();
 
-  return completed === false ? state : recordPhase(state, phase);
+  if (completed === false) {
+    unfinished.push(description);
+    return state;
+  }
+
+  return recordPhase(state, phase);
 };
