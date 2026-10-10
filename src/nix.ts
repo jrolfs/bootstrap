@@ -1,6 +1,6 @@
 import { environment } from './configuration.ts';
 import { shell } from './helpers.ts';
-import { sudo } from './system.ts';
+import { findSystemBinary, sudo } from './system.ts';
 
 const NIX_CONFIG_DIR = '.config/system';
 
@@ -8,11 +8,6 @@ const flakeDir = (home: string): string => `${home}/${NIX_CONFIG_DIR}`;
 
 const flakeTarget = (home: string, hostname: string): string =>
   `${flakeDir(home)}#${hostname}`;
-
-const hasCommand = async (command: string): Promise<boolean> => {
-  const result = await shell('/usr/bin/which', [command], { error: false });
-  return result.success && result.stdout.trim().length > 0;
-};
 
 /**
  * Flake references used to bootstrap the platform's rebuild tool before it is
@@ -58,17 +53,17 @@ export const ensureSystemRebuild = async (): Promise<void> => {
     throw new Error(`Unsupported operating system for system rebuild: ${os}`);
   }
 
-  const installed = await hasCommand(
-    os === 'darwin' ? 'darwin-rebuild' : 'nixos-rebuild',
-  );
+  const name = os === 'darwin' ? 'darwin-rebuild' : 'nixos-rebuild';
+  const installed = await findSystemBinary(name);
 
   if (installed) {
-    const tool = os === 'darwin' ? 'darwin-rebuild' : 'nixos-rebuild';
-    console.log(`✓ ${tool} on PATH; using installed binary`);
+    console.log(`✓ ${name} at ${installed}; using installed binary`);
 
+    // The resolved path rather than the bare name: sudo searches its own
+    // secure PATH, not the system profile, so the name alone isn't found.
     await shell(
       await sudo(),
-      ['-E', tool, 'switch', '--flake', target, '--show-trace'],
+      ['-E', installed, 'switch', '--flake', target, '--show-trace'],
       { cwd, stream: true },
     );
     return;

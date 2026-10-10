@@ -14,7 +14,7 @@ import {
   saveManifest,
 } from './manifest.ts';
 import { createDocument, readDocument } from './onepassword.ts';
-import { findBrewBinary } from './system.ts';
+import { findSystemBinary } from './system.ts';
 import type { GpgKeyring } from './schemas.ts';
 
 /**
@@ -33,19 +33,10 @@ const ownertrustName = (keyring: string): string => `${keyring}-ownertrust`;
 
 /**
  * Resolves `gpg`. It comes from the nix system profile after the first switch,
- * but during a first bootstrap that profile doesn't exist yet, so fall back to
- * Homebrew and finally to a bare PATH lookup.
+ * but during a first bootstrap on macOS that profile doesn't exist yet, so this
+ * falls back to Homebrew.
  */
-const findGpg = async (): Promise<string | null> => {
-  const candidates = ['/run/current-system/sw/bin/gpg', '/usr/local/bin/gpg'];
-
-  for (const candidate of candidates) {
-    const probe = await shell('/usr/bin/which', [candidate], { error: false });
-    if (probe.success) return candidate;
-  }
-
-  return await findBrewBinary('gpg');
-};
+const findGpg = (): Promise<string | null> => findSystemBinary('gpg');
 
 /** Absolute GNUPGHOME for a keyring, or null for gpg's default. */
 const homeFor = (keyring: GpgKeyring): string | null => {
