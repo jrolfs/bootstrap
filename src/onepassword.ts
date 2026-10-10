@@ -191,8 +191,12 @@ const isOpAuthenticated = async (): Promise<boolean> => {
   const op = await findSystemBinary('op');
   if (!op) return false;
 
+  // No stdin: on a host with no account configured, `op` answers this by
+  // offering an interactive menu of ways to sign in rather than failing, and a
+  // probe that can stop and wait for input isn't a probe.
   const result = await shell(op, ['vault', 'list', ...opFlags()], {
     error: false,
+    stdin: 'null',
   });
 
   return result.success;
