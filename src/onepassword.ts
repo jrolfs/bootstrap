@@ -231,6 +231,24 @@ const guideGuiIntegration = async (): Promise<void> => {
 };
 
 /**
+ * Whether the desktop app can authorize `op` for this run.
+ *
+ * Being installed is not enough on Linux. A host can carry the app for when
+ * someone sits down at it and still be reached most of the time from a text
+ * console or over SSH, where there is no session for the app to run in and the
+ * integration can never complete.
+ */
+const canUseDesktopApp = async (): Promise<boolean> => {
+  if (!(await findGuiApp())) return false;
+
+  if (Deno.build.os === 'darwin') return true;
+
+  return Boolean(
+    Deno.env.get('WAYLAND_DISPLAY') || Deno.env.get('DISPLAY'),
+  );
+};
+
+/**
  * Prompts for a service-account token, verifies it, and stores it `0600`.
  *
  * The token is the one credential that can't come from the manifest, for the
@@ -323,7 +341,7 @@ export const ensureOpAuthenticated = async (): Promise<void> => {
     return;
   }
 
-  if (!(await findGuiApp())) {
+  if (!(await canUseDesktopApp())) {
     await authenticateWithServiceAccount();
     return;
   }
