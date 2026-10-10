@@ -50,13 +50,16 @@ export const recordPhase = async (
 };
 
 /**
- * Runs `task` once, recording `phase` in the state file on success. If `phase`
- * is already recorded, logs a skip message and returns the state unchanged.
+ * Brings `phase` about. With a `check`, the machine decides whether that's
+ * needed: the phase runs whenever the check fails, recorded or not, and must
+ * leave the check passing. Without one, `task` runs once and the state file
+ * remembers that it did.
  *
  * @param state Current bootstrap state
- * @param phase Phase identifier to gate on
- * @param description Human-readable description for skip logging
- * @param task Async work to perform when the phase has not yet completed
+ * @param phase Phase identifier
+ * @param description Human-readable description for logging
+ * @param task Async work that brings the phase about
+ * @param check Whether the phase's effect is already in place
  *
  * @returns Updated state
  */
@@ -65,7 +68,29 @@ export const runPhase = async (
   phase: Phase,
   description: string,
   task: () => Promise<boolean | void>,
+  check?: () => Promise<boolean>,
 ): Promise<State> => {
+  // Checked rather than trusted, so a re-run repairs a machine whose state has
+  // moved since the phase was recorded (a key removed, a castle re-locked), or
+  // that got there without the bootstrap (a switch run by hand).
+  if (check) {
+    if (await check()) {
+      console.log(`✓ ${description}`);
+      return recordPhase(state, phase);
+    }
+
+    if ((await task()) === false) return state;
+
+    if (!(await check())) {
+      throw new Error(
+        `${description}: finished without error, but its result isn't in ` +
+          'place. Re-run to try again.',
+      );
+    }
+
+    return recordPhase(state, phase);
+  }
+
   if (hasPhase(state, phase)) {
     console.log(`✓ ${description} (cached)`);
     return state;

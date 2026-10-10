@@ -136,6 +136,31 @@ const check = async (): Promise<void> => {
  *
  * @param only Restrict to these entry names; empty means every applicable one
  */
+/**
+ * Whether every manifest entry for this host that has a target is on disk and
+ * non-empty.
+ */
+export const areSecretsMaterialized = async (): Promise<boolean> => {
+  const manifest = await loadManifest();
+  const { HOME } = environment();
+
+  const targets = entriesForHost(manifest)
+    .map(([, entry]) => entry.target)
+    .filter((target): target is string => target !== undefined);
+
+  const present = await Promise.all(
+    targets.map(async (target) => {
+      try {
+        return (await Deno.stat(`${HOME}/${target}`)).size > 0;
+      } catch {
+        return false;
+      }
+    }),
+  );
+
+  return present.every(Boolean);
+};
+
 export const materializeSecrets = async (
   only: readonly string[] = [],
 ): Promise<void> => {

@@ -17,13 +17,16 @@ import {
   ensureOpAuthenticated,
   ensureOpInstalled,
   installSystemToken,
+  isOpInstalled,
+  isOpReady,
+  isSystemTokenInstalled,
 } from './onepassword.ts';
 import {
   configureResilio,
   restoreMackup,
   waitForResilioSync,
 } from './resilio.ts';
-import { materializeSecrets } from './secrets.ts';
+import { areSecretsMaterialized, materializeSecrets } from './secrets.ts';
 import { hasPhase, loadState, recordPhase, runPhase } from './state.ts';
 import { findSystemBinary } from './system.ts';
 import type { State } from './schemas.ts';
@@ -308,6 +311,68 @@ const unlockPrivateCastle = async (): Promise<boolean> => {
   return false;
 };
 
+// Checks for runPhase: each answers "is this phase's effect already in place?"
+// from the machine itself, so a re-run picks up wherever the machine actually
+// is rather than wherever the state file says it stopped.
+
+/** The key bootstrap generates is on disk and listed on the GitHub account. */
+const isSshKeyOnGitHub = async (): Promise<boolean> => {
+  const { HOME } = environment();
+  const publicKeyPath = `${HOME}/.ssh/id_ed25519.pub`;
+
+  if (!(await pathExists(publicKeyPath))) return false;
+
+  const [type, key] = (await Deno.readTextFile(publicKeyPath)).trim().split(
+    /\s+/,
+  );
+
+  // The public keys endpoint needs no authentication, so this works before
+  // GitHub sign-in has happened on this machine.
+  const response = await fetch(
+    `https://github.com/${configuration.github.user}.keys`,
+  );
+
+  if (!response.ok) return false;
+
+  return (await response.text())
+    .split('\n')
+    .some((line) => line.trim().startsWith(`${type} ${key}`));
+};
+
+const isHomebrewInstalled = async (): Promise<boolean> =>
+  !isDarwin() || await pathExists('/opt/homebrew/bin/brew');
+
+const isPrivateCastleCloned = (): Promise<boolean> =>
+  pathExists(`${privateCastlePath()}/.git`);
+
+const isNixConfigCloned = (): Promise<boolean> =>
+  pathExists(`${environment().HOME}/${NIX_CONFIG_DIR_REL}/.git`);
+
+const isVscodeSyncCloned = async (): Promise<boolean> =>
+  !configuration.vscodeSyncRepo ||
+  await pathExists(`${environment().HOME}/${VSCODE_SYNC_DIR_REL}/.git`);
+
+/**
+ * A system built from the flake is active. home-manager's current generation
+ * exists only after an activation of this configuration, and on macOS so does
+ * nix-darwin's version file. NixOS has no installer-era equivalent to rule
+ * out: an installed NixOS is already a switch of this configuration.
+ */
+const hasSwitched = async (): Promise<boolean> => {
+  const home = await pathExists(
+    `${environment().HOME}/.local/state/home-manager/gcroots/current-home`,
+  );
+
+  if (!home) return false;
+
+  return !isDarwin() || await pathExists('/run/current-system/darwin-version');
+};
+
+// git-crypt keeps the decrypted symmetric key here once unlocked; see
+// unlockPrivateCastle for why `git-crypt status` can't answer this.
+const isPrivateCastleUnlocked = (): Promise<boolean> =>
+  pathExists(`${privateCastlePath()}/.git/git-crypt/keys/default`);
+
 export const bootstrap = async (): Promise<void> => {
   try {
     environment();
@@ -390,6 +455,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await setupSSHKey();
       },
+      isSshKeyOnGitHub,
     );
 
     // `setupSSHKey` performs both key generation and upload; we capture both
@@ -403,6 +469,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await Promise.resolve();
       },
+      isSshKeyOnGitHub,
     );
 
     state = await runPhase(
@@ -412,6 +479,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await ensureHomebrew();
       },
+      isHomebrewInstalled,
     );
 
     // Both platforms, by different means: Homebrew installs the CLI and the
@@ -426,6 +494,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await ensureOpInstalled();
       },
+      isOpInstalled,
     );
 
     state = await runPhase(
@@ -435,6 +504,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await ensureOpAuthenticated();
       },
+      isOpReady,
     );
 
     // After authentication, which is what leaves a verified token behind to
@@ -447,6 +517,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await installSystemToken();
       },
+      isSystemTokenInstalled,
     );
 
     await addKnownHosts();
@@ -458,6 +529,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await setupHomeshickAndPrivate();
       },
+      isPrivateCastleCloned,
     );
 
     state = await runPhase(
@@ -467,6 +539,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await cloneNixConfig();
       },
+      isNixConfigCloned,
     );
 
     state = await runPhase(
@@ -476,6 +549,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await cloneVscodeSync();
       },
+      isVscodeSyncCloned,
     );
 
     state = await runPhase(
@@ -503,6 +577,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await materializeSecrets();
       },
+      areSecretsMaterialized,
     );
 
     state = await runPhase(
@@ -512,6 +587,7 @@ export const bootstrap = async (): Promise<void> => {
       async () => {
         await ensureSystemRebuild();
       },
+      hasSwitched,
     );
 
     // After the switch, not before: `gpg` itself is installed by the switch, and
@@ -533,6 +609,7 @@ export const bootstrap = async (): Promise<void> => {
       'castle-unlocked',
       'Private castle git-crypt unlock',
       () => unlockPrivateCastle(),
+      isPrivateCastleUnlocked,
     );
 
     // mackup restore runs after the switch — mackup is installed by the switch,

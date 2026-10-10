@@ -256,6 +256,48 @@ const canUseDesktopApp = async (): Promise<boolean> => {
 const SYSTEM_TOKEN_PATH = '/var/lib/onepassword/service-account-token';
 
 /**
+ * Whether the 1Password CLI, and on macOS the desktop app, are installed.
+ */
+export const isOpInstalled = async (): Promise<boolean> => {
+  if (Deno.build.os !== 'darwin') {
+    return (await findSystemBinary('op')) !== null;
+  }
+
+  const { cliInstalled, guiInstalled } = await inspectInstallation();
+
+  return cliInstalled && guiInstalled;
+};
+
+/**
+ * Whether `op` can read from the account, by whichever means this host has.
+ *
+ * Loads a saved service account token into this process as it goes. When this
+ * passes, ensureOpAuthenticated is skipped, and every later phase that reads a
+ * secret still needs the token it would have loaded.
+ */
+export const isOpReady = async (): Promise<boolean> => {
+  const token = await readServiceAccountToken();
+
+  if (token) useServiceAccountToken(token);
+  // No token and no desktop session: there's nothing op could succeed with,
+  // and asking would leave it prompting on the terminal.
+  else if (!(await canUseDesktopApp())) return false;
+
+  return await isOpAuthenticated();
+};
+
+/**
+ * Whether system services have the service account token they need, or don't
+ * need one on this host.
+ */
+export const isSystemTokenInstalled = async (): Promise<boolean> => {
+  if (Deno.build.os === 'darwin') return true;
+  if (!(await pathExists(tokenPath()))) return true;
+
+  return await pathExists(SYSTEM_TOKEN_PATH);
+};
+
+/**
  * Gives root its own copy of this host's service account token, so system
  * services can render their secrets from 1Password at boot.
  *
