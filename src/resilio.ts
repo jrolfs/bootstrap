@@ -162,7 +162,10 @@ export const configureResilio = async (): Promise<void> => {
  */
 export const waitForResilioSync = async (): Promise<void> => {
   const resilio = configuration.resilio;
-  if (!resilio?.enabled) return;
+  // Gated the same as configureResilio, which never sets the share up on
+  // Linux: waiting for a share nothing configured just times out. Irulan gets
+  // Resilio from services.resilio in its NixOS config instead.
+  if (!resilio?.enabled || Deno.build.os !== 'darwin') return;
 
   const { HOME } = environment();
   const sharePath = expandHome(HOME, resilio.configSharePath);
