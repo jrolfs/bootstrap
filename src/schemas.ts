@@ -167,6 +167,7 @@ export const phaseSchema = z.enum([
   'homebrew-installed',
   'op-installed',
   'op-authenticated',
+  'op-token-installed',
   'private-cloned',
   'nix-config-cloned',
   'vscode-sync-cloned',

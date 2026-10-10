@@ -13,7 +13,11 @@ import {
   partitionDisks,
   resolveSystemFlake,
 } from './nixos.ts';
-import { ensureOpAuthenticated, ensureOpInstalled } from './onepassword.ts';
+import {
+  ensureOpAuthenticated,
+  ensureOpInstalled,
+  installSystemToken,
+} from './onepassword.ts';
 import {
   configureResilio,
   restoreMackup,
@@ -430,6 +434,18 @@ export const bootstrap = async (): Promise<void> => {
       '1Password CLI authorized (`op vault list`)',
       async () => {
         await ensureOpAuthenticated();
+      },
+    );
+
+    // After authentication, which is what leaves a verified token behind to
+    // copy. A separate phase so hosts that already passed op-authenticated
+    // still pick it up on their next run.
+    state = await runPhase(
+      state,
+      'op-token-installed',
+      'Service account token installed for system services',
+      async () => {
+        await installSystemToken();
       },
     );
 

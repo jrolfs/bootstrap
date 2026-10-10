@@ -13,6 +13,7 @@ import {
   findSystemBinary,
   requireBrewBinary,
   requireSystemBinary,
+  sudo,
 } from './system.ts';
 
 // Current 1Password 8 installs as `1Password.app`; earlier 8.x releases used
@@ -246,6 +247,47 @@ const canUseDesktopApp = async (): Promise<boolean> => {
   return Boolean(
     Deno.env.get('WAYLAND_DISPLAY') || Deno.env.get('DISPLAY'),
   );
+};
+
+/**
+ * Where NixOS services read the service account token, matching
+ * `onepassword.tokenFile` in the system configuration.
+ */
+const SYSTEM_TOKEN_PATH = '/var/lib/onepassword/service-account-token';
+
+/**
+ * Gives root its own copy of this host's service account token, so system
+ * services can render their secrets from 1Password at boot.
+ *
+ * Does nothing on macOS, and on Linux hosts that authenticate through the
+ * desktop app instead of a token.
+ */
+export const installSystemToken = async (): Promise<void> => {
+  if (Deno.build.os === 'darwin') return;
+
+  const source = tokenPath();
+
+  if (!(await pathExists(source))) {
+    console.log('No service account token on this host; nothing to install');
+    return;
+  }
+
+  // Copied by path rather than piped, so the token never appears in an
+  // argument list or passes through this process's output.
+  await shell(await sudo(), [
+    await requireSystemBinary('install'),
+    '-D',
+    '-m',
+    '0600',
+    '-o',
+    'root',
+    '-g',
+    'root',
+    source,
+    SYSTEM_TOKEN_PATH,
+  ]);
+
+  console.log(`✓ service account token installed at ${SYSTEM_TOKEN_PATH}`);
 };
 
 /**
