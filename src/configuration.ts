@@ -18,10 +18,7 @@ export const configuration = configurationSchema.parse({
   homeshick: {
     remote: 'https://github.com/andsens/homeshick.git',
   },
-  // Repo is still named `macos` on GitHub; renaming to `nix` is deferred
-  // (GitHub redirects would cover most cases, but a fresh SSH clone wants the
-  // real name). Flip to `nix.git` once the rename happens.
-  nixConfigRepo: 'git@github.com:jrolfs/macos.git',
+  nixConfigRepo: 'git@github.com:jrolfs/system.git',
   nixConfigBranch: 'main',
   privateCastleRepo: 'git@github.com:jrolfs/private.git',
   vscodeSyncRepo: 'git@github.com:jrolfs/vscode.git',

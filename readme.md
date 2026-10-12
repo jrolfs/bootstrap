@@ -1,7 +1,7 @@
 # Bootstrap
 
 Provisions a fresh machine onto the flake-based nix configuration
-(`~/.config/system`, the consolidated `jrolfs/macos` repo). Works on macOS
+(`~/.config/system`, the [`jrolfs/system`](https://github.com/jrolfs/system) repo). Works on macOS
 (nix-darwin) and NixOS/Linux — platform-specific steps are gated on the OS.
 
 Two stages: a small bash entry point (`bootstrap.sh`) installs Lix and clones
