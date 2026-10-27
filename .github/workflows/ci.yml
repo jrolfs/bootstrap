@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: bootstrap-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The package as this flake's own lock builds it: what
+  # `nix run github:jrolfs/bootstrap` runs on a fresh machine, where nothing
+  # else is installed yet. Both platforms, because provisioning is the one time
+  # a broken build can't be worked around from an existing system.
+  check:
+    name: check (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, ubuntu-24.04]
+    steps:
+      - uses: samueldr/lix-gha-installer-action@v2026-06-15
+      - uses: actions/checkout@v7
+
+      - run: nix build .#bootstrap --print-build-logs --no-link
+      - run: nix develop --command deno task check
+      - run: nix develop --command deno task lint
+      - run: nix develop --command deno fmt --check src
+      - run: nix run nixpkgs#shellcheck -- bootstrap.sh
+
+  # The package as jrolfs/system consumes it: built against that flake's
+  # nixpkgs (it sets `follows`), inside every host's closure. Running the
+  # system's own build with this revision overridden in catches a change here
+  # that would break `nix-switch` there, before it's merged rather than at the
+  # next `nix flake update bootstrap`.
+  system:
+    uses: jrolfs/system/.github/workflows/build.yml@main
+    with:
+      override-input: bootstrap github:jrolfs/bootstrap/${{ github.event.pull_request.head.sha || github.sha }}
