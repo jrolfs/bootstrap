@@ -41,6 +41,6 @@ jobs:
   # that would break `nix-switch` there, before it's merged rather than at the
   # next `nix flake update bootstrap`.
   system:
-    uses: jrolfs/system/.github/workflows/build.yml@ci-nix-builds
+    uses: jrolfs/system/.github/workflows/build.yml@main
     with:
       override-input: bootstrap github:jrolfs/bootstrap/${{ github.event.pull_request.head.sha || github.sha }}
